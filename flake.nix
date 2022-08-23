@@ -21,6 +21,9 @@
             zig.packages.${system}.master.latest
             pkgs.lv2
             pkgs.lv2lint
+            pkgs.jalv
+            pkgs.gdb
+            pkgs.valgrind
           ];
         };
 
