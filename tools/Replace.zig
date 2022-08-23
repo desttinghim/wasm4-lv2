@@ -1,4 +1,4 @@
-//! Uses zig-ldtk to convert a ldtk file into a binary format for wired
+//! Do a naive search and replace on a file
 const std = @import("std");
 
 const KB = 1024;
@@ -15,12 +15,14 @@ step: std.build.Step,
 builder: *std.build.Builder,
 source_path: std.build.FileSource,
 replacements: []const Replacement,
+output_dir: std.build.InstallDir,
 output_name: []const u8,
 output: std.build.GeneratedFile,
 
 pub fn create(b: *std.build.Builder, opt: struct {
     source_path: std.build.FileSource,
     replacements: []const Replacement,
+    output_dir: std.build.InstallDir,
     output_name: []const u8,
 }) *@This() {
     var result = b.allocator.create(ReplaceStep) catch @panic("memory");
@@ -29,6 +31,7 @@ pub fn create(b: *std.build.Builder, opt: struct {
         .builder = b,
         .source_path = opt.source_path,
         .replacements = opt.replacements,
+        .output_dir = opt.output_dir,
         .output_name = opt.output_name,
         .output = undefined,
     };
@@ -52,7 +55,6 @@ fn make(step: *std.build.Step) !void {
     const source = try source_file.readToEndAlloc(allocator, 10 * MB);
     defer allocator.free(source);
 
-
     var replaced_data = try allocator.dupe(u8, source);
     defer allocator.free(replaced_data);
     for (this.replacements) |replacement| {
@@ -62,11 +64,12 @@ fn make(step: *std.build.Step) !void {
     }
 
     // Open output file and write data into it
-    cwd.makePath(this.builder.getInstallPath(.lib, "")) catch |e| switch (e) {
+    cwd.makePath(this.builder.getInstallPath(this.output_dir, "")) catch |e| switch (e) {
         error.PathAlreadyExists => {},
         else => return e,
     };
-    try cwd.writeFile(output, replaced_data);
+    const install_path = this.builder.getInstallPath(this.output_dir, this.output_name);
+    try cwd.writeFile(install_path, replaced_data);
 
     this.output.path = output;
 }
