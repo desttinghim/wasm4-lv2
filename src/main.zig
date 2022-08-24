@@ -2,7 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const c = @import("c.zig");
 
-const URI = "http://lv2plug.in/plugins/eg-amp";
+const URI = "http://lv2plug.in/plugins/eg-midigate";
 
 const PortIndex = enum(usize) {
     Control = 0,
@@ -22,7 +22,7 @@ const Midigate = struct {
 
     // Features
     map: *c.LV2_URID_Map,
-    logger: c.LV2_Log_Logger,
+    // logger: c.LV2_Log_Logger,
 
     uris: struct {
         midi_MidiEvent: c.LV2_URID,
@@ -30,6 +30,12 @@ const Midigate = struct {
 
     n_active_notes: usize,
     program: usize, // 0 = normal, 1 = inverted
+};
+
+const FeatureQuery = struct {
+    uri: [*:0]const u8,
+    data: *?*anyopaque,
+    required: bool,
 };
 
 export fn instantiate(
@@ -41,27 +47,21 @@ export fn instantiate(
     _ = _descriptor;
     _ = rate;
     _ = bundle_path;
+    std.log.info("[instantiate] start", .{});
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     const self = allocator.create(Midigate) catch @panic("Could not allocate");
 
-    // Scan host features for URID map
-    const missing = c.lv2_features_query(
-        features,
-        c.LV2_LOG__log, &self.logger.log, false,
-        c.LV2_URID__map, &self.map, true,
-        c.NULL
-    );
-
-    c.lv2_log_logger_set_map(&self.logger, self.map);
-    if (missing == null) {
-        _ = c.lv2_log_error(&self.logger, "Missing feature <%s>\n", missing);
+    // Scan host features for URID map and return null if the host does not have it
+    self.map = @ptrCast(*c.LV2_URID_Map, @alignCast(@alignOf(c.LV2_URID_Map), c.lv2_features_data(features, c.LV2_URID__map) orelse {
+        std.log.err("Missing feature <{s}>\n", .{ c.LV2_URID__map });
         allocator.destroy(self);
         return null;
-    }
+    }));
 
     self.uris.midi_MidiEvent = self.map.map.?(self.map.handle, c.LV2_MIDI__MidiEvent);
 
+    std.log.info("[instantiate] complete", .{});
     return @ptrCast(c.LV2_Handle, self);
 }
 
@@ -82,7 +82,7 @@ export fn activate(instance: c.LV2_Handle) void {
     self.program = 0;
 }
 
-fn write_output(self: *Midigate, offset: u32, len: u32) void {
+fn write_output(self: *Midigate, offset: u64, len: u64) void {
     const active = if (self.program == 0) self.n_active_notes > 0 else self.n_active_notes == 0;
 
     if (active) {
@@ -97,11 +97,26 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     const self = @ptrCast(*Midigate, @alignCast(@alignOf(*Midigate), instance));
     var offset: u32 = 0;
 
-    var iter: *c.LV2_Atom_Event = c.lv2_atom_sequence_begin(&self.control.body);
-    while (!c.lv2_atom_sequence_is_end(&self.control.body, self.control.atom.size, iter)) : (iter = c.lv2_atom_sequence_next(iter)) {
+    std.debug.assert(self.control.atom.size % @alignOf(u64) == 0);
+
+    const atom = @ptrCast([*]const u8, &self.control.atom);
+    std.log.warn("atom {any}", .{atom[0..@sizeOf(c.LV2_Atom_Sequence)].*});
+    const body = &self.control.body;
+    std.log.warn("align {}, {*}", .{@alignOf([*c]c.LV2_Atom_Event), body});
+    const fds = @ptrCast([*]const u8, body);
+    std.log.warn("midi type {}, fds {any}", .{self.uris.midi_MidiEvent, fds[0..self.control.atom.size]});
+    const fds2 = @ptrCast([*]const u32, @intToPtr([*]const u32, @ptrToInt(body)));
+    std.log.warn("fds2 {any}", .{fds2[0..self.control.atom.size / 4]});
+    const begin = @ptrCast([*]const c.LV2_Atom_Event, @alignCast(@alignOf(u64), @intToPtr([*]const u8, @ptrToInt(&self.control) + @sizeOf(c.LV2_Atom_Sequence))));
+    var iter = begin;
+    while (@ptrToInt(iter) < @ptrToInt(&self.control.body) + self.control.atom.size) {
         const ev = iter;
-        if (ev.body.type == self.uris.midi_MidiEvent) {
-            const msg: [*]const u8 = @intToPtr([*]const u8, @ptrToInt(ev) + 1);
+        iter = c.lv2_atom_sequence_next(iter);
+
+        std.log.warn("ev[0] {}, {}", .{ev[0], ev[0].body.type});
+        if (ev[0].body.type == self.uris.midi_MidiEvent) {
+            const msg = @intToPtr([*]const u8, @ptrToInt(ev) + 1);
+            std.log.warn("msg {*}", .{msg});
             switch (c.lv2_midi_message_type(msg)) {
                 c.LV2_MIDI_MSG_NOTE_ON => self.n_active_notes += 1,
                 c.LV2_MIDI_MSG_NOTE_OFF => self.n_active_notes -|= 1,
@@ -118,9 +133,10 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
                 else => {},
             }
         }
-
-        write_output(self, offset, @intCast(u32, ev.time.frames) - offset);
-        offset = @intCast(u32, ev.time.frames);
+        // std.log.warn("frames: {}, offset {}, {}", .{ev.time.frames, offset, @intCast(u64, ev.time.frames) - offset});
+        std.log.warn("offset {}, frames {}, beats {}", .{offset, ev[0].time.frames, ev[0].time.beats});
+        write_output(self, offset, @intCast(u64, ev[0].time.frames) - offset);
+        offset = @intCast(u32, ev[0].time.frames);
     }
 
     write_output(self, offset, sample_count - offset);
