@@ -4,6 +4,10 @@ const c = @import("c.zig");
 
 const URI = "http://lv2plug.in/plugins/eg-midigate";
 
+// Allocator
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator : std.mem.Allocator = gpa.allocator();
+
 const PortIndex = enum(usize) {
     Control = 0,
     Input = 1,
@@ -11,9 +15,6 @@ const PortIndex = enum(usize) {
 };
 
 const Midigate = struct {
-    // Allocator
-    gpa: std.heap.GeneralPurposeAllocator(.{}),
-    allocator: std.mem.Allocator,
 
     // Port buffers
     control: *const c.LV2_Atom_Sequence,
@@ -48,8 +49,8 @@ export fn instantiate(
     _ = rate;
     _ = bundle_path;
     std.log.info("[instantiate] start", .{});
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    // gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // allocator = gpa.allocator();
     const self = allocator.create(Midigate) catch @panic("Could not allocate");
 
     // Scan host features for URID map and return null if the host does not have it
@@ -92,6 +93,31 @@ fn write_output(self: *Midigate, offset: u64, len: u64) void {
     }
 }
 
+const AtomEventIter = struct {
+    sequence: *const c.LV2_Atom_Sequence,
+    begin: [*]const c.LV2_Atom_Event,
+    iter: [*]const c.LV2_Atom_Event,
+
+    fn init (sequence: *const c.LV2_Atom_Sequence) @This() {
+        const ptr_int = @ptrToInt(&sequence) + @sizeOf(c.LV2_Atom_Sequence);
+        const ptr = @ptrCast([*]const c.LV2_Atom_Event, @alignCast(@alignOf(u64), @intToPtr([*]const u8, ptr_int)));
+        return @This() {
+            .sequence = sequence,
+            .begin = ptr,
+            .iter = ptr,
+        };
+    }
+
+    fn next(self: *@This()) ?*const c.LV2_Atom_Event {
+        if (@ptrToInt(self.iter) >= @ptrToInt(&self.sequence.body) + self.sequence.atom.size) {
+            return null;
+        }
+        const iter = self.iter;
+        self.iter = c.lv2_atom_sequence_next(self.iter);
+        return &iter[0];
+    }
+};
+
 export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     if (instance == null) return;
     const self = @ptrCast(*Midigate, @alignCast(@alignOf(*Midigate), instance));
@@ -99,22 +125,9 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
 
     std.debug.assert(self.control.atom.size % @alignOf(u64) == 0);
 
-    const atom = @ptrCast([*]const u8, &self.control.atom);
-    std.log.warn("atom {any}", .{atom[0..@sizeOf(c.LV2_Atom_Sequence)].*});
-    const body = &self.control.body;
-    std.log.warn("align {}, {*}", .{@alignOf([*c]c.LV2_Atom_Event), body});
-    const fds = @ptrCast([*]const u8, body);
-    std.log.warn("midi type {}, fds {any}", .{self.uris.midi_MidiEvent, fds[0..self.control.atom.size]});
-    const fds2 = @ptrCast([*]const u32, @intToPtr([*]const u32, @ptrToInt(body)));
-    std.log.warn("fds2 {any}", .{fds2[0..self.control.atom.size / 4]});
-    const begin = @ptrCast([*]const c.LV2_Atom_Event, @alignCast(@alignOf(u64), @intToPtr([*]const u8, @ptrToInt(&self.control) + @sizeOf(c.LV2_Atom_Sequence))));
-    var iter = begin;
-    while (@ptrToInt(iter) < @ptrToInt(&self.control.body) + self.control.atom.size) {
-        const ev = iter;
-        iter = c.lv2_atom_sequence_next(iter);
-
-        std.log.warn("ev[0] {}, {}", .{ev[0], ev[0].body.type});
-        if (ev[0].body.type == self.uris.midi_MidiEvent) {
+    var iter = AtomEventIter.init(self.control);
+    while (iter.next()) |ev| {
+        if (ev.body.type == self.uris.midi_MidiEvent) {
             const msg = @intToPtr([*]const u8, @ptrToInt(ev) + 1);
             std.log.warn("msg {*}", .{msg});
             switch (c.lv2_midi_message_type(msg)) {
@@ -133,10 +146,8 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
                 else => {},
             }
         }
-        // std.log.warn("frames: {}, offset {}, {}", .{ev.time.frames, offset, @intCast(u64, ev.time.frames) - offset});
-        std.log.warn("offset {}, frames {}, beats {}", .{offset, ev[0].time.frames, ev[0].time.beats});
-        write_output(self, offset, @intCast(u64, ev[0].time.frames) - offset);
-        offset = @intCast(u32, ev[0].time.frames);
+        write_output(self, offset, @intCast(u64, ev.time.frames) - offset);
+        offset = @intCast(u32, ev.time.frames);
     }
 
     write_output(self, offset, sample_count - offset);
@@ -147,10 +158,13 @@ export fn deactivate(instance: c.LV2_Handle) void {
 }
 
 export fn cleanup(instance: c.LV2_Handle) void {
+    std.log.info("[cleanup] begin", .{});
     if (instance == null) return;
     const self = @ptrCast(*Midigate, @alignCast(@alignOf(*Midigate), instance));
 
-    self.allocator.destroy(self);
+    std.log.info("[cleanup] destroy", .{});
+    allocator.destroy(self);
+    std.log.info("[cleanup] complete", .{});
 }
 
 export fn extension_data(uri: ?[*]const u8) ?*anyopaque {
