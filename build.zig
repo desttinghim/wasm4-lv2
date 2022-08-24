@@ -32,12 +32,15 @@ pub fn build(b: *std.build.Builder) void {
     lib.linkLibC();
     lib.addIncludePath("deps/lv2/include");
     lib.force_pic = true;
+    lib.install();
 
-    lib.step.dependOn(&replace.step);
-    lib.step.dependOn(&install_manifest_inc.step);
+    const copy_lib = b.addInstallFileWithDir(lib.getOutputLibSource(), bundle_dir, "midigate" ++ lib_ext);
+    copy_lib.step.dependOn(&lib.install_step.?.step);
 
-    // Install lib into the bundle directory
-    _ = lib.installRaw("midigate" ++ lib_ext, .{ .dest_dir = bundle_dir });
+    const bundle_step = b.step("bundle", "Create lv2 bundle");
+    bundle_step.dependOn(&replace.step);
+    bundle_step.dependOn(&install_manifest_inc.step);
+    bundle_step.dependOn(&copy_lib.step);
 
     const main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);
