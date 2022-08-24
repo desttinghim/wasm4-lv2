@@ -2,7 +2,7 @@ const std = @import("std");
 const ReplaceStep = @import("tools/Replace.zig");
 
 const manifest = std.build.FileSource{ .path = "manifest.ttl.in" };
-const manifest_include = std.build.FileSource{ .path = "amp.ttl" };
+const manifest_include = std.build.FileSource{ .path = "midigate.ttl" };
 
 pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
@@ -10,7 +10,7 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     // Create bundle directory
-    const bundle_dir = std.build.InstallDir{ .custom = "myAmp.lv2" };
+    const bundle_dir = std.build.InstallDir{ .custom = "midigate.lv2" };
 
     // Build manifest with correct library extension
     // TODO: make build use platform lib extension
@@ -25,9 +25,9 @@ pub fn build(b: *std.build.Builder) void {
     });
 
     // Add manifest file to bundle
-    const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "amp.ttl");
+    const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "midigate.ttl");
 
-    const lib = b.addSharedLibrary("amp", "src/main.zig", .unversioned);
+    const lib = b.addSharedLibrary("midigate", "src/main.zig", .unversioned);
     lib.setBuildMode(mode);
     lib.linkLibC();
     lib.addIncludePath("deps/lv2/include");
@@ -37,7 +37,7 @@ pub fn build(b: *std.build.Builder) void {
     lib.step.dependOn(&install_manifest_inc.step);
 
     // Install lib into the bundle directory
-    _ = lib.installRaw("amp" ++ lib_ext, .{ .dest_dir = bundle_dir });
+    _ = lib.installRaw("midigate" ++ lib_ext, .{ .dest_dir = bundle_dir });
 
     const main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);

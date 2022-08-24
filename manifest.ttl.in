@@ -1,7 +1,8 @@
 @prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ui:   <http://lv2plug.in/ns/extensions/ui#> .
 
-<http://lv2plug.in/plugins/eg-amp>
+<http://lv2plug.in/plugins/eg-midigate>
     a lv2:Plugin ;
-    lv2:binary <amp@LIB_EXT@> ;
-    rdfs:seeAlso <amp.ttl> .
+    lv2:binary <midigate@LIB_EXT@> ;
+    rdfs:seeAlso <midigate.ttl> .
