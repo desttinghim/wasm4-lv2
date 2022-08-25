@@ -2,7 +2,7 @@ const std = @import("std");
 const ReplaceStep = @import("tools/Replace.zig");
 
 const manifest = std.build.FileSource{ .path = "manifest.ttl.in" };
-const manifest_include = std.build.FileSource{ .path = "fifths.ttl" };
+const manifest_include = std.build.FileSource{ .path = "wasm4.ttl" };
 
 pub fn build(b: *std.build.Builder) void {
     // Standard release options allow the person running `zig build` to select
@@ -10,7 +10,7 @@ pub fn build(b: *std.build.Builder) void {
     const mode = b.standardReleaseOptions();
 
     // Create bundle directory
-    const bundle_dir = std.build.InstallDir{ .custom = "fifths.lv2" };
+    const bundle_dir = std.build.InstallDir{ .custom = "wasm4.lv2" };
 
     // Build manifest with correct library extension
     // TODO: make build use platform lib extension
@@ -25,16 +25,16 @@ pub fn build(b: *std.build.Builder) void {
     });
 
     // Add manifest file to bundle
-    const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "fifths.ttl");
+    const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "wasm4.ttl");
 
-    const lib = b.addSharedLibrary("fifths", "src/main.zig", .unversioned);
+    const lib = b.addSharedLibrary("wasm4", "src/main.zig", .unversioned);
     lib.setBuildMode(mode);
     lib.linkLibC();
     lib.addIncludePath("deps/lv2/include");
     lib.force_pic = true;
     lib.install();
 
-    const copy_lib = b.addInstallFileWithDir(lib.getOutputLibSource(), bundle_dir, "fifths" ++ lib_ext);
+    const copy_lib = b.addInstallFileWithDir(lib.getOutputLibSource(), bundle_dir, "wasm4" ++ lib_ext);
     copy_lib.step.dependOn(&lib.install_step.?.step);
 
     const bundle_step = b.step("bundle", "Create lv2 bundle");

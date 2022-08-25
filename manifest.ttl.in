@@ -2,7 +2,7 @@
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix ui:   <http://lv2plug.in/ns/extensions/ui#> .
 
-<http://lv2plug.in/plugins/eg-fifths>
+<https://github.com/desttinghim/wasm4-lv2>
     a lv2:Plugin ;
-    lv2:binary <fifths@LIB_EXT@> ;
-    rdfs:seeAlso <fifths.ttl> .
+    lv2:binary <wasm4@LIB_EXT@> ;
+    rdfs:seeAlso <wasm4.ttl> .
