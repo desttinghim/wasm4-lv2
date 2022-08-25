@@ -16,7 +16,6 @@ export fn instantiate(
     features_opt: ?[*]const ?[*]const c.LV2_Feature,
 ) callconv(.C) c.LV2_Handle {
     _ = _descriptor;
-    _ = rate;
     _ = bundle_path;
     const features = features_opt orelse return null;
 
@@ -25,7 +24,7 @@ export fn instantiate(
         return null;
     };
 
-    self.init(allocator, features) catch {
+    self.init(allocator, rate, features) catch {
         std.log.err("Couldn't initialize WASM4 instrument", .{});
         allocator.destroy(self);
         return null;

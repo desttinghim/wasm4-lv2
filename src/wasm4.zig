@@ -7,20 +7,18 @@ map: *c.LV2_URID_Map,
 // logger: c.LV2_Log_Logger,
 
 // Port buffers
-in_port: *const c.LV2_Atom_Sequence,
-out_port: [*]f32,
-channel: *const f32,
-attack: *const f32,
-decay: *const f32,
-sustain: *const f32,
-release: *const f32,
-peak: *const f32,
-pan: *const f32,
+in_port: ?*const c.LV2_Atom_Sequence = null,
+out_port: ?[*]f32 = null,
+controls: std.EnumArray(ControlPort, ?*const f32) = std.EnumArray(ControlPort, ?*const f32).initFill(null),
 
+// URI Lookup
 uris: URIs,
 
+// Sampling variables
+sample_rate: f64,
+position: f64,
 
-pub fn init(this: *@This(), allocator: std.mem.Allocator, features:  [*]const ?[*]const c.LV2_Feature) !void {
+pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64,  features: [*]const ?[*]const c.LV2_Feature) !void {
     const presentFeatures = try lv2.queryFeatures(allocator, features, &required_features);
     defer allocator.free(presentFeatures);
 
@@ -29,22 +27,21 @@ pub fn init(this: *@This(), allocator: std.mem.Allocator, features:  [*]const ?[
     }));
 
     this.uris = URIs.init(this.map);
+
+    this.sample_rate = sample_rate;
+    this.position = 0;
 }
 
 pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
     switch (port) {
         .Input => this.in_port = @ptrCast(*const c.LV2_Atom_Sequence, @alignCast(@alignOf(c.LV2_Atom_Sequence), ptr)),
         .Output => this.out_port = @ptrCast([*]f32, @alignCast(@alignOf([*]f32), ptr)),
-        .Channel => this.channel = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
-        .Attack => this.attack = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
-        .Decay => this.decay = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
-        .Sustain => this.sustain = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
-        .Release => this.release = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
-        .Peak => this.peak = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
-        .Pan => this.pan = @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)),
+        else => {
+            const control = @intToEnum(ControlPort, @enumToInt(port));
+            this.controls.set(control, @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)));
+        },
     }
 }
-
 
 // Struct for 3 byte MIDI event, used for writing notes
 const MIDINoteEvent = extern struct {
@@ -53,20 +50,37 @@ const MIDINoteEvent = extern struct {
 };
 
 pub fn run(this: *@This(), sample_count: u32) !void {
+    const in_port = this.in_port orelse return;
+    const out_port = this.out_port orelse return;
+    var controls = std.EnumArray(ControlPort, *const f32).initUndefined();
+    var control_iter = this.controls.iterator();
+    while (control_iter.next()) |control| {
+        controls.set(control.key, control.value.* orelse return);
+    }
 
-    var output = this.out_port[0..sample_count];
+    var output = out_port[0..sample_count];
     _ = output;
 
+    for (output) |*sample| {
+        sample.* = std.math.sin(2.0 * std.math.pi * @floatCast(f32, this.position)) * controls.get(.Sustain).*;
+        this.position += 440.0 / this.sample_rate;
+    }
+
     // Read incoming events
-    var iter = lv2.AtomEventReader.init(this.in_port);
+    var iter = lv2.AtomEventReader.init(in_port);
     while (iter.next()) |ev| {
+        // const frame = ev.ev.time.frames;
         if (ev.ev.body.type == this.uris.midi_Event) {
             const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
             switch (c.lv2_midi_message_type(&msg_type)) {
-                c.LV2_MIDI_MSG_NOTE_ON,
-                c.LV2_MIDI_MSG_NOTE_OFF,
-                => {
+                c.LV2_MIDI_MSG_NOTE_ON => {
+                    // TODO
+                },
+                c.LV2_MIDI_MSG_NOTE_OFF => {
                     // TODO read notes and write to apu
+                },
+                c.LV2_MIDI_MSG_CONTROLLER => {
+                    // TODO
                 },
                 else => {
                     // TODO
@@ -76,13 +90,23 @@ pub fn run(this: *@This(), sample_count: u32) !void {
     }
 }
 
-pub const required_features =  [_]lv2.FeatureQuery{
-    .{.uri = c.LV2_URID__map, .required = true},
+pub const required_features = [_]lv2.FeatureQuery{
+    .{ .uri = c.LV2_URID__map, .required = true },
 };
 
 pub const PortIndex = enum(usize) {
     Input = 0,
     Output = 1,
+    Channel = 2,
+    Attack = 3,
+    Decay = 4,
+    Sustain = 5,
+    Release = 6,
+    Peak = 7,
+    Pan = 8,
+};
+
+pub const ControlPort = enum(usize) {
     Channel = 2,
     Attack = 3,
     Decay = 4,
