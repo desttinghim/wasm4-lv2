@@ -1,4 +1,5 @@
 pub usingnamespace @cImport({
+    @cInclude("main.h");
     @cInclude("lv2/atom/atom.h");
     @cInclude("lv2/atom/util.h");
     @cInclude("lv2/core/lv2.h");
