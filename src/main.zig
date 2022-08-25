@@ -89,7 +89,12 @@ export fn connect_port(instance: c.LV2_Handle, port: u32, data: ?*anyopaque) voi
     }
 }
 
-const AtomIter = struct {
+const Event = struct {
+    ev: c.LV2_Atom_Event,
+    msg: []const u8,
+};
+
+const AtomEventReader = struct {
     sequence: *const c.LV2_Atom_Sequence,
     buffer: []const u8,
     fixed_buffer_stream: FBS,
@@ -107,11 +112,6 @@ const AtomIter = struct {
         };
         return this;
     }
-
-    const Event = struct {
-        ev: c.LV2_Atom_Event,
-        msg: []const u8,
-    };
 
     fn _next(this: *@This()) !Event {
         var reader = this.reader orelse reader: {
@@ -142,38 +142,59 @@ const AtomIter = struct {
     }
 };
 
+const AtomEventWriter = struct {
+    sequence: *c.LV2_Atom_Sequence,
+    buffer: []u8,
+    fixed_buffer_stream: FBS,
+    writer: ?FBS.Writer,
+
+    const FBS = std.io.FixedBufferStream([]u8);
+
+    fn init(sequence: *c.LV2_Atom_Sequence) @This() {
+        const bytes = @alignCast(1, @ptrCast([*]u8, sequence)[@sizeOf(c.LV2_Atom_Sequence) .. @sizeOf(c.LV2_Atom_Sequence) + sequence.atom.size]);
+        var this = @This(){
+            .sequence = sequence,
+            .buffer = bytes,
+            .fixed_buffer_stream = std.io.FixedBufferStream([]u8){ .buffer = bytes, .pos = 0 },
+            .writer = null,
+        };
+        return this;
+    }
+
+    fn writeAtom(writer: anytype, event: *const c.LV2_Atom_Event) !void {
+        try writer.writeInt(i64, event.time.frames, .Little);
+        try writer.writeInt(u32, event.body.size, .Little);
+        try writer.writeInt(u32, event.body.type, .Little);
+    }
+
+    fn writeBytes (writer: anytype, msg: []const u8) !void {
+        const aligned = ((msg.len / 8) + 1) * 8;
+        var i: usize = 0;
+        for (msg) |byte| {
+            i += 1;
+            try writer.writeByte(byte);
+        }
+        while (i < aligned) : (i += 1) {
+            try writer.writeByte(0);
+        }
+    }
+
+    fn append(this: *@This(), event: *const c.LV2_Atom_Event, msg: []const u8) !void {
+        var writer = this.writer orelse this.fixed_buffer_stream.writer();
+        const total_size = @sizeOf(c.LV2_Atom_Event) + event.body.size;
+
+        try writeAtom(writer, event);
+        try writeBytes(writer, msg);
+
+        this.sequence.atom.size += total_size + (8 - (total_size % 8));
+    }
+};
+
 // Struct for 3 byte MIDI event, used for writing notes
 const MIDINoteEvent = extern struct {
     event: c.LV2_Atom_Event,
     msg: [3]u8,
 };
-
-fn writeAtom(writer: anytype, event: *const c.LV2_Atom_Event) !void {
-    try writer.writeInt(i64, event.time.frames, .Little);
-    try writer.writeInt(u32, event.body.size, .Little);
-    try writer.writeInt(u32, event.body.type, .Little);
-}
-
-fn writeBytes (writer: anytype, msg: []const u8) !void {
-    const aligned = ((msg.len / 8) + 1) * 8;
-    var i: usize = 0;
-    for (msg) |byte| {
-        i += 1;
-        try writer.writeByte(byte);
-    }
-    while (i < aligned) : (i += 1) {
-        try writer.writeByte(0);
-    }
-}
-
-fn atomEventAppend(sequence: *c.LV2_Atom_Sequence, writer: anytype, event: *const c.LV2_Atom_Event, msg: []const u8) !void {
-    const total_size = @sizeOf(c.LV2_Atom_Event) + event.body.size;
-
-    try writeAtom(writer, event);
-    try writeBytes(writer, msg);
-
-    sequence.atom.size += total_size + (8 - (total_size % 8));
-}
 
 export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     _ = sample_count;
@@ -183,16 +204,14 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     // Initially self.out_port contains a Chunk with size set to capacity
 
     // Get the capacity
-    const out_capacity = self.out_port.atom.size;
-    var out = std.io.FixedBufferStream([]u8){.buffer = @ptrCast([*]u8, self.out_port)[@sizeOf(c.LV2_Atom_Sequence)..out_capacity], .pos = 0};
-    var writer = out.writer();
+    var writer = AtomEventWriter.init(self.out_port);
 
     // Write an empty Sequence header to the output
     c.lv2_atom_sequence_clear(self.out_port);
     self.out_port.atom.type = self.in_port.atom.type;
 
     // Read incoming events
-    var iter = AtomIter.init(self.in_port);
+    var iter = AtomEventReader.init(self.in_port);
     while (iter.next()) |ev| {
         if (ev.ev.body.type == self.uris.midi_Event) {
             const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
@@ -200,7 +219,7 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
                 c.LV2_MIDI_MSG_NOTE_ON,
                 c.LV2_MIDI_MSG_NOTE_OFF,
                 => {
-                    atomEventAppend(self.out_port, writer, &ev.ev, ev.msg) catch @panic("eh");
+                    writer.append(&ev.ev, ev.msg) catch @panic("eh");
 
                     if (ev.msg[1] <= 127 - 7) {
                         // Make a note one 5th (7 semitones) higher than input
@@ -214,11 +233,11 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
                             }
                         };
 
-                        atomEventAppend(self.out_port, writer, &fifth.event, &fifth.msg) catch @panic("eh");
+                        writer.append(&fifth.event, &fifth.msg) catch @panic("eh");
                     }
                 },
                 else => {
-                    atomEventAppend(self.out_port, writer, &ev.ev, ev.msg) catch @panic("eh");
+                    writer.append(&ev.ev, ev.msg) catch @panic("eh");
                 },
             }
         }
