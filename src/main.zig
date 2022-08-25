@@ -191,30 +191,30 @@ fn dump_sequence(sequence: *const c.LV2_Atom_Sequence) !void {
             ev.msg,
         });
     }
-    // var fbs = std.io.FixedBufferStream([]const u8){ .buffer = bytes, .pos = 0 };
-    // var reader = fbs.reader();
-    // var size: u32 = undefined;
-    // var t: u32 = undefined;
-    // size = try reader.readInt(u32, .Little);
-    // t = try reader.readInt(u32, .Little);
-    // _ = try reader.readInt(u32, .Little); // time type
-    // _ = try reader.readInt(u32, .Little); // padding
-    // var atom_byte: usize = 0;
-    // while (atom_byte < size) {
-    //     var frame = try reader.readInt(u64, .Little);
-    //     atom_byte += 8;
-    //     var atype = try reader.readInt(u32, .Little);
-    //     atom_byte += 4;
-    //     var asize = try reader.readInt(u32, .Little);
-    //     atom_byte += 4;
-    //     std.log.info("{}: {} {}", .{ frame, asize, atype });
-    //     var ab: usize = 0;
-    //     while (ab < asize or (ab) % 8 != 0) : (ab += 1) {
-    //         atom_byte += 1;
-    //         var datum = try reader.readByte();
-    //         std.log.info("\t{}", .{datum});
-    //     }
-    // }
+}
+
+// Struct for 3 byte MIDI event, used for writing notes
+const MIDINoteEvent = extern struct {
+    event: c.LV2_Atom_Event,
+    msg: [3]u8,
+};
+
+fn writeAtom(writer: anytype, event: *const c.LV2_Atom_Event) !void {
+    try writer.writeInt(i64, event.time.frames, .Little);
+    try writer.writeInt(u32, event.body.size, .Little);
+    try writer.writeInt(u32, event.body.type, .Little);
+}
+
+fn writeBytes (writer: anytype, msg: []const u8) !void {
+    const aligned = ((msg.len / 8) + 1) * 8;
+    var i: usize = 0;
+    for (msg) |byte| {
+        i += 1;
+        try writer.writeByte(byte);
+    }
+    while (i < aligned) : (i += 1) {
+        try writer.writeByte(0);
+    }
 }
 
 export fn run(instance: c.LV2_Handle, sample_count: u32) void {
@@ -223,17 +223,13 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     if (instance == null) return;
     const self = @ptrCast(*Fifths, @alignCast(@alignOf(*Fifths), instance));
 
-    // Struct for 3 byte MIDI event, used for writing notes
-    const MIDINoteEvent = extern struct {
-        event: c.LV2_Atom_Event,
-        msg: [3]u8,
-    };
-
     // Initially self.out_port contains a Chunk with size set to capacity
 
     // Get the capacity
     const out_capacity = self.out_port.atom.size;
     // std.log.info("out_capacity={}", .{out_capacity});
+    var out = std.io.FixedBufferStream([]u8){.buffer = @ptrCast([*]u8, self.out_port)[0..out_capacity], .pos = 0};
+    var writer = out.writer();
 
     // Write an empty Sequence header to the output
     c.lv2_atom_sequence_clear(self.out_port);
@@ -253,46 +249,50 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     while (iter.next()) |ev| {
         if (ev.ev.body.type == self.uris.midi_Event) {
             std.log.info("[run] midi event", .{});
-            const msg_type = if (ev.msg.len > 0) ev.msg[0] else continue;
-            switch (c.lv2_midi_message_type(msg_type)) {
+            const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
+            std.log.info("[run] message type {}", .{msg_type});
+            switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON,
                 c.LV2_MIDI_MSG_NOTE_OFF,
                 => {
                     std.log.info("[run] adding fifth...", .{});
                     // Forward note to output
-                    _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &ev.ev);
+                    writeAtom(writer, &ev.ev) catch @panic("eh");
+                    writeBytes(writer, ev.msg) catch @panic("eh");
 
                     if (ev.msg[1] <= 127 - 7) {
                         // Make a note one 5th (7 semitones) higher than input
                         // We could simply copy the value of ev here...
                         var fifth = MIDINoteEvent{
-                            .event = .{
-                                .time = .{ .frames = ev.ev.time.frames }, // Same time
-                                .body = .{
-                                    .type = ev.ev.body.type, // Same type
-                                    .size = ev.ev.body.size, // Same size
-                                },
-                            },
+                            .event = ev.ev,
                             .msg = .{
                                 ev.msg[0], // Same status
                                 ev.msg[1] + 7, // Pitch up 7 semitones
                                 ev.msg[2], // Same velocity
-                            },
+                            }
                         };
 
-                        _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &fifth.event);
+                        writeAtom(writer, &fifth.event) catch @panic("eh");
+                        writeBytes(writer, ev.msg) catch @panic("eh");
                     }
                 },
                 else => {
                     std.log.info("[run] forwarding...", .{});
+                    writeAtom(writer, &ev.ev) catch @panic("eh");
+                    writeBytes(writer, ev.msg) catch @panic("eh");
                     // Forward all other MIDI events directly
-                    _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &ev.ev);
+                    // _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &ev.ev);
                 },
             }
         } else {
             std.log.info("[run] {} frames: {} is not a note", .{ ev.ev.time.frames, ev.ev.body.type });
         }
     }
+
+    dump_sequence(self.out_port) catch |e| switch (e) {
+        error.EndOfStream => {},
+    };
+
 }
 
 export fn cleanup(instance: c.LV2_Handle) void {
