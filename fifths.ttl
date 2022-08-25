@@ -5,10 +5,9 @@
 @prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix urid: <http://lv2plug.in/ns/ext/urid#> .
 
-<http://lv2plug.in/plugins/eg-midigate>
-    a lv2:Plugin ,
-        lv2:AmplifierPlugin ;
-    doap:name "Example MIDI Gate" ;
+<http://lv2plug.in/plugins/eg-fifths>
+    a lv2:Plugin ;
+    doap:name "Example Fifths" ;
     doap:license <http://opensource.org/licenses/isc> ;
     lv2:project <http://lv2plug.in/ns/lv2> ;
     lv2:requiredFeature urid:map ;
@@ -18,20 +17,15 @@
                 atom:AtomPort ;
         atom:bufferType atom:Sequence ;
         atom:supports midi:MidiEvent ;
-        lv2:designation lv2:control ;
         lv2:index 0 ;
-        lv2:symbol "control" ;
-        lv2:name "Control" ;
+        lv2:symbol "In" ;
+        lv2:name "Out" ;
     ] , [
-        a lv2:AudioPort ,
-            lv2:InputPort ;
+        a lv2:OutputPort ,
+            atom:AtomPort ;
+        atom:bufferType atom:Sequence ;
+        atom:supports midi:MidiEvent ;
         lv2:index 1 ;
-        lv2:symbol "in" ;
-        lv2:name "In"
-    ] , [
-        a lv2:AudioPort ,
-            lv2:OutputPort ;
-        lv2:index 2 ;
         lv2:symbol "out" ;
         lv2:name "Out"
     ] .
