@@ -171,17 +171,17 @@ fn dump_sequence(sequence: *const c.LV2_Atom_Sequence) !void {
     if (sequence.atom.size <= 8) {
         return;
     }
-    const bytes = @ptrCast([*]const u8, sequence)[0 .. @sizeOf(c.LV2_Atom_Sequence) + sequence.atom.size];
-    var a: usize = 0;
-    var i: usize = 0;
-    while (i < sequence.atom.size + @sizeOf(c.LV2_Atom_Sequence)) : (i += 1) {
-        if (i - a == 8) {
-            std.log.info("{} {} {} {} {} {} {} {}", .{ bytes[a], bytes[a + 1], bytes[a + 2], bytes[a + 3], bytes[a + 4], bytes[a + 5], bytes[a + 6], bytes[a + 7] });
-            a = i;
-        }
-        if (i == @sizeOf(c.LV2_Atom_Sequence)) std.log.info("", .{});
-        if (i > @sizeOf(c.LV2_Atom_Sequence) and i % @sizeOf(u64) == 0) std.log.info("", .{});
-    }
+    // const bytes = @ptrCast([*]const u8, sequence)[0 .. @sizeOf(c.LV2_Atom_Sequence) + sequence.atom.size];
+    // var a: usize = 0;
+    // var i: usize = 0;
+    // while (i < sequence.atom.size + @sizeOf(c.LV2_Atom_Sequence)) : (i += 1) {
+    //     if (i - a == 8) {
+    //         std.log.info("{} {} {} {} {} {} {} {}", .{ bytes[a], bytes[a + 1], bytes[a + 2], bytes[a + 3], bytes[a + 4], bytes[a + 5], bytes[a + 6], bytes[a + 7] });
+    //         a = i;
+    //     }
+    //     if (i == @sizeOf(c.LV2_Atom_Sequence)) std.log.info("", .{});
+    //     if (i > @sizeOf(c.LV2_Atom_Sequence) and i % @sizeOf(u64) == 0) std.log.info("", .{});
+    // }
     var iter = AtomIter.init(sequence);
     while (iter.next()) |ev| {
         std.log.info("{} {} {} {any}", .{
@@ -217,6 +217,16 @@ fn writeBytes (writer: anytype, msg: []const u8) !void {
     }
 }
 
+fn atomEventAppend(sequence: *c.LV2_Atom_Sequence, writer: anytype, event: *const c.LV2_Atom_Event, msg: []const u8) !void {
+    const total_size = @sizeOf(c.LV2_Atom_Event) + event.body.size;
+
+    try writeAtom(writer, event);
+    try writeBytes(writer, msg);
+
+    sequence.atom.size += total_size + (8 - (total_size % 8));
+    std.log.info("[run] new size {}", .{sequence.atom.size});
+}
+
 export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     // std.log.info("[run] start", .{});
     _ = sample_count;
@@ -228,7 +238,7 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     // Get the capacity
     const out_capacity = self.out_port.atom.size;
     // std.log.info("out_capacity={}", .{out_capacity});
-    var out = std.io.FixedBufferStream([]u8){.buffer = @ptrCast([*]u8, self.out_port)[0..out_capacity], .pos = 0};
+    var out = std.io.FixedBufferStream([]u8){.buffer = @ptrCast([*]u8, self.out_port)[@sizeOf(c.LV2_Atom_Sequence)..out_capacity], .pos = 0};
     var writer = out.writer();
 
     // Write an empty Sequence header to the output
@@ -257,8 +267,9 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
                 => {
                     std.log.info("[run] adding fifth...", .{});
                     // Forward note to output
-                    writeAtom(writer, &ev.ev) catch @panic("eh");
-                    writeBytes(writer, ev.msg) catch @panic("eh");
+                    // writeAtom(writer, &ev.ev) catch @panic("eh");
+                    // writeBytes(writer, ev.msg) catch @panic("eh");
+                    atomEventAppend(self.out_port, writer, &ev.ev, ev.msg) catch @panic("eh");
 
                     if (ev.msg[1] <= 127 - 7) {
                         // Make a note one 5th (7 semitones) higher than input
@@ -272,14 +283,16 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
                             }
                         };
 
-                        writeAtom(writer, &fifth.event) catch @panic("eh");
-                        writeBytes(writer, ev.msg) catch @panic("eh");
+                        // writeAtom(writer, &fifth.event) catch @panic("eh");
+                        // writeBytes(writer, ev.msg) catch @panic("eh");
+                        atomEventAppend(self.out_port, writer, &fifth.event, &fifth.msg) catch @panic("eh");
                     }
                 },
                 else => {
                     std.log.info("[run] forwarding...", .{});
-                    writeAtom(writer, &ev.ev) catch @panic("eh");
-                    writeBytes(writer, ev.msg) catch @panic("eh");
+                    // writeAtom(writer, &ev.ev) catch @panic("eh");
+                    // writeBytes(writer, ev.msg) catch @panic("eh");
+                    atomEventAppend(self.out_port, writer, &ev.ev, ev.msg) catch @panic("eh");
                     // Forward all other MIDI events directly
                     // _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &ev.ev);
                 },
@@ -289,10 +302,13 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
         }
     }
 
+    // self.out_port.atom.size = @intCast(u32, out.getPos() catch {});
+
     dump_sequence(self.out_port) catch |e| switch (e) {
         error.EndOfStream => {},
     };
 
+    std.log.info("[run] end", .{});
 }
 
 export fn cleanup(instance: c.LV2_Handle) void {
