@@ -28,8 +28,6 @@ pub fn build(b: *std.build.Builder) void {
     const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "fifths.ttl");
 
     const lib = b.addSharedLibrary("fifths", "src/main.zig", .unversioned);
-    lib.addCSourceFile("src/main.c", &.{""});
-    lib.addIncludePath("src/");
     lib.setBuildMode(mode);
     lib.linkLibC();
     lib.addIncludePath("deps/lv2/include");

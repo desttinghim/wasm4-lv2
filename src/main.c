@@ -1,4 +1,5 @@
 #include "main.h"
+#include <stdio.h>
 
 LV2_Atom_Event *atom_sequence_begin(const LV2_Atom_Sequence_Body *body) {
   return lv2_atom_sequence_begin(body);
@@ -18,5 +19,7 @@ bool atom_sequence_is_end(const LV2_Atom_Sequence_Body *body, uint32_t size,
 
 /** Return an iterator to the element following `i`. */
 LV2_Atom_Event *atom_sequence_next(const LV2_Atom_Event *i) {
-  return lv2_atom_sequence_next(i);
+  printf("pictures taken moments before disaster:");
+  return (LV2_Atom_Event *)((const uint8_t *)i + sizeof(LV2_Atom_Event) +
+                            lv2_atom_pad_size(i->body.size));
 }

@@ -104,35 +104,73 @@ export fn connect_port(instance: c.LV2_Handle, port: u32, data: ?*anyopaque) voi
     switch (@intToEnum(PortIndex, port)) {
         .Input => {
             self.in_port = @ptrCast(*const c.LV2_Atom_Sequence, @alignCast(@alignOf(c.LV2_Atom_Sequence), data));
-            std.log.info("[connect] {}, {}", .{ @ptrToInt(self.in_port), @ptrToInt(self.in_port) % @alignOf(u64) });
+            // std.log.info("[connect] {}, {}", .{ @ptrToInt(self.in_port), @ptrToInt(self.in_port) % @alignOf(u64) });
             // std.debug.assert(@ptrToInt(self.in_port) % @alignOf(u64) == 0);
         },
         .Output => self.out_port = @ptrCast(*c.LV2_Atom_Sequence, @alignCast(@alignOf(c.LV2_Atom_Sequence), data)),
     }
 }
 
-const AtomEventIter = struct {
+const AtomIter = struct {
     sequence: *const c.LV2_Atom_Sequence,
-    iter: [*]const c.LV2_Atom_Event,
-
+    buffer: []const u8,
+    fixed_buffer_stream: FBS,
+    reader: ?FBS.Reader,
+    const FBS = std.io.FixedBufferStream([]const u8);
     fn init(sequence: *const c.LV2_Atom_Sequence) @This() {
-        const begin = c.atom_sequence_begin(&sequence.body);
-        std.log.info("{*} init atom event iter {*}", .{sequence, begin});
-        return @This(){
+        const bytes = @alignCast(1, @ptrCast([*]const u8, sequence)[@sizeOf(c.LV2_Atom_Sequence) .. @sizeOf(c.LV2_Atom_Sequence) + sequence.atom.size]);
+        var this = @This(){
             .sequence = sequence,
-            .iter = begin,
+            .buffer = bytes,
+            .fixed_buffer_stream = std.io.FixedBufferStream([]const u8){ .buffer = bytes, .pos = 0 },
+            .reader = null,
+        };
+        // size = try this.reader.readInt(u32, .Little);
+        // t = try this.reader.readInt(u32, .Little);
+        // _ = try this.reader.readInt(u32, .Little); // time type
+        // _ = try this.reader.readInt(u32, .Little); // padding
+        return this;
+    }
+
+    const Event = struct {
+        ev: c.LV2_Atom_Event,
+        msg: []const u8,
+    };
+
+    fn _next(this: *@This()) !Event {
+        var reader = this.reader orelse reader: {
+            this.reader = this.fixed_buffer_stream.reader();
+            break :reader this.reader.?;
+        };
+
+        var frame = try reader.readInt(i64, .Little);
+        var asize = try reader.readInt(u32, .Little);
+        var atype = try reader.readInt(u32, .Little);
+        var byte_pos = try this.fixed_buffer_stream.getPos();
+        try reader.skipBytes((@divTrunc(asize, 8) + 1) * 8, .{});
+        std.log.info("{}: {} {}", .{ frame, asize, atype });
+        var buffer = if (asize > 0) this.buffer[byte_pos .. byte_pos + asize] else &[_]u8{};
+
+        return Event{
+            .ev = .{ .time = .{ .frames = frame }, .body = .{
+                .size = asize,
+                .type = atype,
+            } },
+            .msg = buffer,
         };
     }
 
-    fn next(self: *@This()) ?*const c.LV2_Atom_Event {
-        if (c.atom_sequence_is_end(&self.sequence.body, self.sequence.atom.size, self.iter)) return null;
-        std.log.info("atom event iter next", .{});
-        var iter = c.atom_sequence_next(self.iter);
-        return iter;
+    fn next(this: *@This()) ?Event {
+        return this._next() catch |e| switch (e) {
+            error.EndOfStream => return null,
+        };
     }
 };
 
 fn dump_sequence(sequence: *const c.LV2_Atom_Sequence) !void {
+    if (sequence.atom.size <= 8) {
+        return;
+    }
     const bytes = @ptrCast([*]const u8, sequence)[0 .. @sizeOf(c.LV2_Atom_Sequence) + sequence.atom.size];
     var a: usize = 0;
     var i: usize = 0;
@@ -144,40 +182,37 @@ fn dump_sequence(sequence: *const c.LV2_Atom_Sequence) !void {
         if (i == @sizeOf(c.LV2_Atom_Sequence)) std.log.info("", .{});
         if (i > @sizeOf(c.LV2_Atom_Sequence) and i % @sizeOf(u64) == 0) std.log.info("", .{});
     }
-    if (sequence.atom.size <= 8) {
-        std.log.info("sequence is too short", .{});
-        return;
+    var iter = AtomIter.init(sequence);
+    while (iter.next()) |ev| {
+        std.log.info("{} {} {} {any}", .{
+            ev.ev.time.frames,
+            ev.ev.body.type,
+            ev.ev.body.size,
+            ev.msg,
+        });
     }
-    var fbs = std.io.FixedBufferStream([]const u8){ .buffer = bytes, .pos = 0 };
-    var reader = fbs.reader();
-    var size: u32 = undefined;
-    var t: u32 = undefined;
-    size = try reader.readInt(u32, .Little);
-    t = try reader.readInt(u32, .Little);
-    _ = try reader.readInt(u32, .Little); // time type
-    _ = try reader.readInt(u32, .Little); // padding
-    var atom_byte: usize = 0;
-    while (atom_byte < size) {
-        var frame = try reader.readInt(u64, .Little);
-        atom_byte += 8;
-        var atype = try reader.readInt(u32, .Little);
-        atom_byte += 4;
-        var asize = try reader.readInt(u32, .Little);
-        atom_byte += 4;
-        std.log.info("{}: {} {}", .{ frame, asize, atype });
-        var ab: usize = 0;
-        while (ab < asize or (ab) % 8 != 0) : (ab += 1) {
-            atom_byte += 1;
-            var datum = try reader.readByte();
-            std.log.info("\t{}", .{datum});
-        }
-    }
-    // while (iter.next()) |ev| {
-    //     std.log.info("frames: {}, size: {}, type: {}", .{ ev.time.frames, ev.body.size, ev.body.type });
-    //     if (ev.body.size > 0) {
-    //         const ev_head_end = @sizeOf(c.LV2_Atom);
-    //         const ev_bytes = @ptrCast([*]const u8, &ev.body)[ev_head_end .. ev_head_end + ev.body.size];
-    //         std.log.info("data: {any}", .{ev_bytes});
+    // var fbs = std.io.FixedBufferStream([]const u8){ .buffer = bytes, .pos = 0 };
+    // var reader = fbs.reader();
+    // var size: u32 = undefined;
+    // var t: u32 = undefined;
+    // size = try reader.readInt(u32, .Little);
+    // t = try reader.readInt(u32, .Little);
+    // _ = try reader.readInt(u32, .Little); // time type
+    // _ = try reader.readInt(u32, .Little); // padding
+    // var atom_byte: usize = 0;
+    // while (atom_byte < size) {
+    //     var frame = try reader.readInt(u64, .Little);
+    //     atom_byte += 8;
+    //     var atype = try reader.readInt(u32, .Little);
+    //     atom_byte += 4;
+    //     var asize = try reader.readInt(u32, .Little);
+    //     atom_byte += 4;
+    //     std.log.info("{}: {} {}", .{ frame, asize, atype });
+    //     var ab: usize = 0;
+    //     while (ab < asize or (ab) % 8 != 0) : (ab += 1) {
+    //         atom_byte += 1;
+    //         var datum = try reader.readByte();
+    //         std.log.info("\t{}", .{datum});
     //     }
     // }
 }
@@ -189,15 +224,15 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     const self = @ptrCast(*Fifths, @alignCast(@alignOf(*Fifths), instance));
 
     // Struct for 3 byte MIDI event, used for writing notes
-    // const MIDINoteEvent = extern struct {
-    //     event: c.LV2_Atom_Event,
-    //     msg: [3]u8,
-    // };
+    const MIDINoteEvent = extern struct {
+        event: c.LV2_Atom_Event,
+        msg: [3]u8,
+    };
 
     // Initially self.out_port contains a Chunk with size set to capacity
 
     // Get the capacity
-    // const out_capacity = self.out_port.atom.size;
+    const out_capacity = self.out_port.atom.size;
     // std.log.info("out_capacity={}", .{out_capacity});
 
     // Write an empty Sequence header to the output
@@ -207,53 +242,55 @@ export fn run(instance: c.LV2_Handle, sample_count: u32) void {
     std.debug.assert(self.in_port.atom.size % @alignOf(u64) == 0);
     std.debug.assert(self.out_port.atom.size % @alignOf(u64) == 0);
 
-    // dump_sequence(self.in_port) catch @panic("whatever");
+    dump_sequence(self.in_port) catch |e| switch (e) {
+        error.EndOfStream => {},
+    };
 
     // std.log.info("[run] after dump", .{});
 
     // Read incoming events
-    var iter = AtomEventIter.init(self.in_port);
+    var iter = AtomIter.init(self.in_port);
     while (iter.next()) |ev| {
-        if (ev.body.type == self.uris.midi_Event) {
+        if (ev.ev.body.type == self.uris.midi_Event) {
             std.log.info("[run] midi event", .{});
-            // const msg = @intToPtr([*]const u8, @ptrToInt(ev) + 1);
-            // switch (c.lv2_midi_message_type(msg)) {
-            //     c.LV2_MIDI_MSG_NOTE_ON,
-            //     c.LV2_MIDI_MSG_NOTE_OFF,
-            //     => {
-            //         std.log.info("[run] adding fifth...", .{});
-            //         // Forward note to output
-            //         _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, ev);
+            const msg_type = if (ev.msg.len > 0) ev.msg[0] else continue;
+            switch (c.lv2_midi_message_type(msg_type)) {
+                c.LV2_MIDI_MSG_NOTE_ON,
+                c.LV2_MIDI_MSG_NOTE_OFF,
+                => {
+                    std.log.info("[run] adding fifth...", .{});
+                    // Forward note to output
+                    _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &ev.ev);
 
-            //         if (msg[1] <= 127 - 7) {
-            //             // Make a note one 5th (7 semitones) higher than input
-            //             // We could simply copy the value of ev here...
-            //             var fifth = MIDINoteEvent{
-            //                 .event = .{
-            //                     .time = .{ .frames = ev.time.frames }, // Same time
-            //                     .body = .{
-            //                         .type = ev.body.type, // Same type
-            //                         .size = ev.body.size, // Same size
-            //                     },
-            //                 },
-            //                 .msg = .{
-            //                     msg[0], // Same status
-            //                     msg[1] + 7, // Pitch up 7 semitones
-            //                     msg[2], // Same velocity
-            //                 },
-            //             };
+                    if (ev.msg[1] <= 127 - 7) {
+                        // Make a note one 5th (7 semitones) higher than input
+                        // We could simply copy the value of ev here...
+                        var fifth = MIDINoteEvent{
+                            .event = .{
+                                .time = .{ .frames = ev.ev.time.frames }, // Same time
+                                .body = .{
+                                    .type = ev.ev.body.type, // Same type
+                                    .size = ev.ev.body.size, // Same size
+                                },
+                            },
+                            .msg = .{
+                                ev.msg[0], // Same status
+                                ev.msg[1] + 7, // Pitch up 7 semitones
+                                ev.msg[2], // Same velocity
+                            },
+                        };
 
-            //             _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &fifth.event);
-            //         }
-            //     },
-            //     else => {
-            //         std.log.info("[run] forwarding...", .{});
-            //         // Forward all other MIDI events directly
-            //         _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, ev);
-            //     },
-            // }
+                        _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &fifth.event);
+                    }
+                },
+                else => {
+                    std.log.info("[run] forwarding...", .{});
+                    // Forward all other MIDI events directly
+                    _ = c.lv2_atom_sequence_append_event(self.out_port, out_capacity, &ev.ev);
+                },
+            }
         } else {
-            std.log.info("[run] {} frames: {} is not a note", .{ ev.time.frames, ev.body.type });
+            std.log.info("[run] {} frames: {} is not a note", .{ ev.ev.time.frames, ev.ev.body.type });
         }
     }
 }
