@@ -16,20 +16,23 @@ uris: URIs,
 
 // Sampling variables
 sample_rate: f64,
-position: f64,
+position: f64 = 0,
+key: Key,
 
-pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64,  features: [*]const ?[*]const c.LV2_Feature) !void {
+pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, features: [*]const ?[*]const c.LV2_Feature) !void {
     const presentFeatures = try lv2.queryFeatures(allocator, features, &required_features);
     defer allocator.free(presentFeatures);
 
-    this.map = @ptrCast(*c.LV2_URID_Map, @alignCast(@alignOf(c.LV2_URID_Map), presentFeatures[0] orelse {
-        return error.MissingURIDMap;
-    }));
-
-    this.uris = URIs.init(this.map);
-
-    this.sample_rate = sample_rate;
-    this.position = 0;
+    this.* = @This(){
+        .map = @ptrCast(*c.LV2_URID_Map, @alignCast(@alignOf(c.LV2_URID_Map), presentFeatures[0] orelse {
+            return error.MissingURIDMap;
+        })),
+        .uris = URIs.init(this.map),
+        .sample_rate = sample_rate,
+        .key = .{
+            .rate = sample_rate,
+        },
+    };
 }
 
 pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
@@ -43,11 +46,13 @@ pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
     }
 }
 
-// Struct for 3 byte MIDI event, used for writing notes
-const MIDINoteEvent = extern struct {
-    event: c.LV2_Atom_Event,
-    msg: [3]u8,
-};
+fn play(this: *@This(), controls: std.EnumArray(ControlPort, *const f32), output: []f32, start: u32, end: u32) void {
+    var i = start;
+    while (i < end) : (i += 1) {
+        output[i] = this.key.get() * controls.get(.Level).*;
+        this.key.proceed();
+    }
+}
 
 pub fn run(this: *@This(), sample_count: u32) !void {
     const in_port = this.in_port orelse return;
@@ -61,26 +66,39 @@ pub fn run(this: *@This(), sample_count: u32) !void {
     var output = out_port[0..sample_count];
     _ = output;
 
-    for (output) |*sample| {
-        sample.* = std.math.sin(2.0 * std.math.pi * @floatCast(f32, this.position)) * controls.get(.Sustain).*;
-        this.position += 440.0 / this.sample_rate;
-    }
-
+    var last_frame: i64 = 0;
     // Read incoming events
     var iter = lv2.AtomEventReader.init(in_port);
     while (iter.next()) |ev| {
-        // const frame = ev.ev.time.frames;
+        const frame = ev.ev.time.frames;
+        this.play(controls, output, @intCast(u32, last_frame), @intCast(u32, frame));
+        last_frame = frame;
+
         if (ev.ev.body.type == this.uris.midi_Event) {
             const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
             switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON => {
-                    // TODO
+                    this.key.press(
+                        ev.msg[1],
+                        ev.msg[2],
+                        .{
+                            .attack = controls.get(.Attack).*,
+                            .decay = controls.get(.Decay).*,
+                            .sustain = controls.get(.Sustain).*,
+                            .release = controls.get(.Release).*,
+                        },
+                    );
                 },
                 c.LV2_MIDI_MSG_NOTE_OFF => {
-                    // TODO read notes and write to apu
+                    this.key.release(ev.msg[1], ev.msg[2]);
                 },
                 c.LV2_MIDI_MSG_CONTROLLER => {
-                    // TODO
+                    switch (ev.msg[1]) {
+                        c.LV2_MIDI_CTL_ALL_NOTES_OFF,
+                        c.LV2_MIDI_CTL_ALL_SOUNDS_OFF,
+                        => this.key.off(),
+                        else => {},
+                    }
                 },
                 else => {
                     // TODO
@@ -88,6 +106,8 @@ pub fn run(this: *@This(), sample_count: u32) !void {
             }
         }
     }
+
+    this.play(controls, output, @intCast(u32, last_frame), @intCast(u32, sample_count));
 }
 
 pub const required_features = [_]lv2.FeatureQuery{
@@ -104,6 +124,7 @@ pub const PortIndex = enum(usize) {
     Release = 6,
     Peak = 7,
     Pan = 8,
+    Level = 9,
 };
 
 pub const ControlPort = enum(usize) {
@@ -114,6 +135,101 @@ pub const ControlPort = enum(usize) {
     Release = 6,
     Peak = 7,
     Pan = 8,
+    Level = 9,
+};
+
+const KeyStatus = enum {
+    Off,
+    Pressed,
+    Released,
+};
+
+const Envelope = struct {
+    attack: f64,
+    decay: f64,
+    sustain: f32,
+    release: f64,
+};
+
+const Key = struct {
+    status: KeyStatus = .Off,
+    note: u8 = 0,
+    velocity: u8 = 0,
+    envelope: Envelope = .{
+        .attack = 0,
+        .decay = 0,
+        .sustain = 0,
+        .release = 0,
+    },
+    rate: f64,
+    position: f64 = 0,
+    start_level: f32 = 0,
+    freq: f64 = 0,
+    time: f64 = 0,
+
+    fn press(this: *@This(), note: u8, vel: u8, env: Envelope) void {
+        this.start_level = this.adsr();
+        this.note = note;
+        this.velocity = vel;
+        this.envelope = env;
+        this.status = .Pressed;
+        this.freq = std.math.pow(f64, 2.0, (@intToFloat(f64, note) - 69.0) / 12.0) * 440;
+        this.time = 0;
+    }
+
+    fn release(this: *@This(), note: u8, vel: u8) void {
+        _ = vel;
+        if (this.status == .Pressed and this.note == note) {
+            this.start_level = this.adsr();
+            this.time = 0;
+            this.status = .Released;
+        }
+    }
+
+    fn off(this: *@This()) void {
+        this.position = 0;
+        this.status = .Off;
+    }
+
+    fn adsr(this: *@This()) f32 {
+        const start_level = @floatCast(f32, this.time);
+        const time = @floatCast(f32, this.time);
+        const attack = @floatCast(f32, this.envelope.attack);
+        const decay = @floatCast(f32, this.envelope.decay);
+        const sustain = @floatCast(f32, this.envelope.sustain);
+        const _release = @floatCast(f32, this.envelope.release);
+        switch (this.status) {
+            .Pressed => {
+                if (this.time < attack) {
+                    return start_level + (1 - start_level) * time / attack;
+                }
+
+                if (time < decay) {
+                    return 1 + (sustain - 1) * (time - attack) / decay;
+                }
+
+                return sustain;
+            },
+            .Released => {
+                return start_level - start_level * time / _release;
+            },
+            .Off => {
+                return 0;
+            },
+        }
+    }
+
+    fn get(this: *@This()) f32 {
+        return this.adsr() * std.math.sin(2 * std.math.pi * @floatCast(f32, this.position)) * (@intToFloat(f32, this.velocity) / 127.0);
+    }
+
+    fn proceed(this: *@This()) void {
+        this.time += 1 / this.rate;
+        this.position += this.freq / this.rate;
+        if (this.status == .Released and this.time >= this.envelope.release) {
+            this.off();
+        }
+    }
 };
 
 const URIs = struct {
