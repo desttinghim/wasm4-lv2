@@ -27,19 +27,12 @@ pub fn build(b: *std.build.Builder) void {
     // Add manifest file to bundle
     const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "wasm4.ttl");
 
-    const wasm4_apu = b.addStaticLibrary("wasm4-apu", "deps/wasm4/runtimes/native/src/apu.c");
-    wasm4_apu.addIncludePath("deps/wasm4/runtimes/native/src/");
-    wasm4_apu.linkLibC();
-    wasm4_apu.install();
-
     const lib = b.addSharedLibrary("wasm4", "src/main.zig", .unversioned);
     lib.setBuildMode(mode);
     lib.linkLibC();
     lib.addIncludePath("deps/lv2/include");
     lib.addCSourceFile("src/apu.c", &.{});
     lib.addIncludePath("src/");
-    lib.step.dependOn(&wasm4_apu.step);
-    lib.addObjectFileSource(wasm4_apu.getOutputLibSource());
     lib.force_pic = true;
     lib.install();
 

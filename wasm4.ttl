@@ -109,4 +109,17 @@
         lv2:default 0.1 ;
         lv2:minimum 0.0 ;
         lv2:maximum 1.0 ;
+    ] , [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 10 ;
+        lv2:symbol "mode" ;
+        lv2:name "Mode" ;
+        lv2:portProperty lv2:integer , lv2:enumeration ;
+        lv2:scalePoint [ rdfs:label "1/8" ; rdf:value 0 ] ;
+        lv2:scalePoint [ rdfs:label "1/4" ; rdf:value 1 ] ;
+        lv2:scalePoint [ rdfs:label "1/2" ; rdf:value 2 ] ;
+        lv2:scalePoint [ rdfs:label "3/4" ; rdf:value 3 ] ;
+        lv2:default 0 ;
+        lv2:minimum 0 ;
+        lv2:maximum 4 ;
     ] .

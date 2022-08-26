@@ -63,9 +63,15 @@ typedef struct {
 
     /** The current time, in samples. */
     unsigned long long time;
+
+    int16_t sample_rate;
+
+    int16_t max_volume;
+
+    int16_t max_volume_triangle;
 } WASM4_APU;
 
-void w4_apuInit (WASM4_APU* apu);
+void w4_apuInit (WASM4_APU* apu, uint16_t sample_rate);
 
 void w4_apuTone (WASM4_APU* apu, int frequency, int duration, int volume, int flags);
 

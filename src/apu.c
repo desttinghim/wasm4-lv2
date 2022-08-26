@@ -55,9 +55,26 @@ static float polyblep (float phase, float phaseInc) {
     }
 }
 
-void w4_apuInit (APU *apu) {
+void w4_apuInit (APU *apu, uint16_t sample_rate) {
     apu->channels[3].noise.seed = 0x0001;
     apu->time = 0;
+    apu->sample_rate = sample_rate;
+    apu->max_volume = 0x1333; // ~15% of INT16_MAX
+    apu->max_volume_triangle = 0x2000; // ~25% of INT16_MAX
+    for (int channelIdx = 0; channelIdx < 4; ++channelIdx) {
+        Channel* channel = &apu->channels[channelIdx];
+        channel->freq1 = 0;
+        channel->freq2 = 0;
+        channel->startTime = 0;
+        channel->attackTime = 0;
+        channel->decayTime = 0;
+        channel->sustainTime = 0;
+        channel->releaseTime = 0;
+        channel->sustainVolume = 0;
+        channel->peakVolume = 0;
+        channel->phase = 0;
+        channel->pan = 0;
+    }
 }
 
 void w4_apuTone (APU *apu, int frequency, int duration, int volume, int flags) {
@@ -87,11 +104,11 @@ void w4_apuTone (APU *apu, int frequency, int duration, int volume, int flags) {
     channel->freq1 = freq1;
     channel->freq2 = freq2;
     channel->startTime = apu->time;
-    channel->attackTime = channel->startTime + W4_SAMPLE_RATE*attack/60;
-    channel->decayTime = channel->attackTime + W4_SAMPLE_RATE*decay/60;
-    channel->sustainTime = channel->decayTime + W4_SAMPLE_RATE*sustain/60;
-    channel->releaseTime = channel->sustainTime + W4_SAMPLE_RATE*release/60;
-    int16_t maxVolume = (channelIdx == 2) ? W4_MAX_VOLUME_TRIANGLE : W4_MAX_VOLUME;
+    channel->attackTime = channel->startTime + apu->sample_rate*attack/60;
+    channel->decayTime = channel->attackTime + apu->sample_rate*decay/60;
+    channel->sustainTime = channel->decayTime + apu->sample_rate*sustain/60;
+    channel->releaseTime = channel->sustainTime + apu->sample_rate*release/60;
+    int16_t maxVolume = (channelIdx == 2) ? apu->max_volume_triangle : apu->max_volume;
     channel->sustainVolume = maxVolume * sustainVolume/100;
     channel->peakVolume = peakVolume ? maxVolume * peakVolume/100 : maxVolume;
     channel->pan = pan;
@@ -181,7 +198,7 @@ void w4_apuWriteSamples (APU *apu, int16_t* output, unsigned long frames) {
             }
         }
 
-        *output++ = mix_left;
-        *output++ = mix_right;
+        output[ii] = mix_left;
+        output[ii] = mix_right;
     }
 }
