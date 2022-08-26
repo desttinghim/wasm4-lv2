@@ -2,7 +2,7 @@
   description = "WASM-4's APU in a LV2 plugin.";
 
   inputs = {
-    zig.url = "github:arqv/zig-overlay";
+    zig.url = "github:mitchellh/zig-overlay";
     flake-utils.url = "github:numtide/flake-utils";
     unstable.url = "nixpkgs/nixos-unstable";
   };
@@ -18,7 +18,7 @@
         # nix develop
         devShells.default = pkgs.mkShell {
           buildInputs = [
-            zig.packages.${system}.master.latest
+            zig.packages.${system}.master
             pkgs.lv2
             pkgs.lv2lint
             pkgs.jalv
