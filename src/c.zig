@@ -8,4 +8,5 @@ pub usingnamespace @cImport({
     @cInclude("lv2/midi/midi.h");
     @cInclude("lv2/patch/patch.h");
     @cInclude("lv2/urid/urid.h");
+    @cInclude("apu.h");
 });

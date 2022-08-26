@@ -24,8 +24,8 @@ export fn instantiate(
         return null;
     };
 
-    self.init(allocator, rate, features) catch {
-        std.log.err("Couldn't initialize WASM4 instrument", .{});
+    self.init(allocator, rate, features) catch |e| {
+        std.log.err("Couldn't initialize WASM4 instrument: {s}", .{@errorName(e)});
         allocator.destroy(self);
         return null;
     };

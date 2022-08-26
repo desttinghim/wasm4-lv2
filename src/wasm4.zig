@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("c.zig");
 const lv2 = @import("lv2.zig");
+const filter = @import("filter.zig");
 
 // Features
 map: *c.LV2_URID_Map,
@@ -18,8 +19,15 @@ uris: URIs,
 sample_rate: f64,
 position: f64 = 0,
 key: Key,
+apu: c.WASM4_APU = undefined,
+buffer_i16: []i16,
 
 pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, features: [*]const ?[*]const c.LV2_Feature) !void {
+    if (!std.math.approxEqAbs(f64, @intToFloat(f64, c.W4_SAMPLE_RATE), sample_rate, 0.1))  {
+        std.log.info("Host sample_rate={}, w4 sample_rate={}", .{sample_rate, c.W4_SAMPLE_RATE});
+        return error.SampleRateMismatch;
+    }
+
     const presentFeatures = try lv2.queryFeatures(allocator, features, &required_features);
     defer allocator.free(presentFeatures);
 
@@ -32,7 +40,11 @@ pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, feat
         .key = .{
             .rate = sample_rate,
         },
+        // Size is copied from scope example
+        .buffer_i16 = try allocator.alloc(i16, 65664),
     };
+
+    c.w4_apuInit(&this.apu);
 }
 
 pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
