@@ -42,11 +42,11 @@ jobs:
         run: zig build bundle -Drelease-safe
 
       - name: Version
-        run: echo "::set-output name=version::$(zig build -Dversion)"
+        run: echo "::set-output name=version::$(zig build -Dversion -Dskip)"
         id: version
 
       - name: Tar files
-        run: tar -cvf wasm4-lv2-${{ steps.version.outputs.version }}-${{ matrix.os }}.tar ./zig-out/wasm4.lv2
+        run: tar --directory=./zig-out -cvf wasm4-lv2-${{ steps.version.outputs.version }}-${{ matrix.os }}.tar ./wasm4.lv2
 
       - name: Upload bundle
         uses: actions/upload-artifact@v3
@@ -69,25 +69,15 @@ jobs:
           submodules: true
 
       - name: Version
-        run: echo "::set-output name=version::$(zig build -Dversion)"
+        run: echo "::set-output name=version::$(zig build -Dversion -Dskip)"
         id: version
 
       - uses: actions/download-artifact@v3
         id: download
 
       - name: Release
-        uses: softprops/actions-gh-release@v1
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags')
         with:
           files: |
             *.tar
-
-
-      - name: upload linux artifact
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: steps.download
-          asset_name: azblogfilter.linux-amd64.tar.gz
-          asset_content_type: application/gzip
