@@ -39,3 +39,9 @@ jobs:
       # Runs a single command using the runners shell
       - name: Run a one-line script
         run: zig build bundle -Drelease-safe
+
+      - name: Upload ${{ matrix.os }} bundle
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.os }}-bundle
+          path: zig-out/wasm4.lv2
