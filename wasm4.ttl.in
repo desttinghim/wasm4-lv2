@@ -16,8 +16,8 @@
     lv2:project <https://github.com/desttinghim/wasm4-lv2> ;
     lv2:optionalFeature lv2:hardRTCapable ;
     lv2:requiredFeature urid:map ;
-    lv2:minorVersion 1 ;
-    lv2:microVersion 0 ;
+    lv2:minorVersion @VERSION_MINOR@ ;
+    lv2:microVersion @VERSION_MICRO@ ;
     lv2:port [
         a lv2:InputPort , atom:AtomPort ;
         lv2:index 0 ;

@@ -37,11 +37,15 @@ jobs:
           version: master
 
       # Runs a single command using the runners shell
-      - name: Run a one-line script
+      - name: Build bundle
         run: zig build bundle -Drelease-safe
 
-      - name: Upload ${{ matrix.os }} bundle
+      - name: Version
+        run: echo "::set-output name=version::$(zig build -Dversion)"
+        id: version
+
+      - name: Upload bundle
         uses: actions/upload-artifact@v3
         with:
-          name: ${{ matrix.os }}-bundle
-          path: zig-out/wasm4.lv2
+          name: wasm4-lv2-${{ steps.version.outputs.version }}-${{ matrix.os }}
+          path: ./*/wasm4.lv2

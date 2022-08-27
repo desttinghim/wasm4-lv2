@@ -4,7 +4,7 @@ const ReplaceStep = @import("tools/Replace.zig");
 const manifest = std.build.FileSource{ .path = "manifest.ttl.in" };
 const manifest_include = std.build.FileSource{ .path = "wasm4.ttl" };
 
-pub fn build(b: *std.build.Builder) void {
+pub fn build(b: *std.build.Builder) !void {
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
@@ -13,10 +13,12 @@ pub fn build(b: *std.build.Builder) void {
     // Create bundle directory
     const bundle_dir = std.build.InstallDir{ .custom = "wasm4.lv2" };
 
-    // Add manifest file to bundle
-    const install_manifest_inc = b.addInstallFileWithDir(manifest_include, bundle_dir, "wasm4.ttl");
+    const version = b.version(0, 1, 0);
+    const version_str = b.fmt("v{}.{}.{}", .{ version.versioned.major, version.versioned.minor, version.versioned.patch });
+    const version_minor = try std.fmt.allocPrint(b.allocator, "{}", .{version.versioned.minor});
+    const version_micro = try std.fmt.allocPrint(b.allocator, "{}", .{version.versioned.patch});
 
-    const lib = b.addSharedLibrary("wasm4", "src/main.zig", .unversioned);
+    const lib = b.addSharedLibrary("wasm4", "src/main.zig", version);
     lib.setBuildMode(mode);
     lib.setTarget(target);
     lib.linkLibC();
@@ -26,23 +28,46 @@ pub fn build(b: *std.build.Builder) void {
     lib.force_pic = true;
     lib.install();
 
-    const copy_lib = b.addInstallFileWithDir(lib.getOutputLibSource(), bundle_dir, lib.out_filename);
+    const libname = try b.allocator.dupe(u8, lib.out_filename);
+
+    const copy_lib = b.addInstallFileWithDir(lib.getOutputLibSource(), bundle_dir, libname);
     copy_lib.step.dependOn(&lib.install_step.?.step);
 
     // Build manifest with the library name
-    const replace = ReplaceStep.create(b, .{
+    const manifest_replacements = try b.allocator.alloc(ReplaceStep.Replacement, 1);
+    manifest_replacements[0] = ReplaceStep.Replacement{ .search = "@LIB_NAME@", .replacement = libname };
+
+    const replace_manifest_ttl = ReplaceStep.create(b, .{
         .source_path = .{ .path = "manifest.ttl.in" },
         .output_name = "manifest.ttl",
         .output_dir = bundle_dir,
-        .replacements = &[_]ReplaceStep.Replacement{
-            .{ .search = "@LIB_NAME@", .replacement = lib.out_filename },
-        },
+        .replacements = manifest_replacements,
+    });
+    replace_manifest_ttl.step.dependOn(&copy_lib.step);
+
+    // Add version numbers to wasm4.ttl
+    const wasm4_replacements = try b.allocator.alloc(ReplaceStep.Replacement, 2);
+    wasm4_replacements[0] = ReplaceStep.Replacement{ .search = "@VERSION_MINOR@", .replacement = version_minor };
+    wasm4_replacements[1] = ReplaceStep.Replacement{ .search = "@VERSION_MICRO@", .replacement = version_micro };
+
+    const replace_wasm4_ttl = ReplaceStep.create(b, .{
+        .source_path = .{ .path = "wasm4.ttl.in" },
+        .output_name = "wasm4.ttl",
+        .output_dir = bundle_dir,
+        .replacements = wasm4_replacements,
     });
 
     const bundle_step = b.step("bundle", "Create lv2 bundle");
-    bundle_step.dependOn(&replace.step);
-    bundle_step.dependOn(&install_manifest_inc.step);
+    bundle_step.dependOn(&replace_manifest_ttl.step);
+    bundle_step.dependOn(&replace_wasm4_ttl.step);
     bundle_step.dependOn(&copy_lib.step);
+
+    const print_version_opt = b.option(bool, "version", "logs version number to output");
+    if (print_version_opt) |print_version| {
+        if (print_version) {
+            std.debug.print("{s}", .{version_str});
+        }
+    }
 
     const main_tests = b.addTest("src/main.zig");
     main_tests.setBuildMode(mode);

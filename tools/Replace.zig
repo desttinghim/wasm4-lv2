@@ -58,6 +58,10 @@ fn make(step: *std.build.Step) !void {
     var replaced_data = try allocator.dupe(u8, source);
     defer allocator.free(replaced_data);
     for (this.replacements) |replacement| {
+        if (!std.mem.containsAtLeast(u8, replaced_data, 1, replacement.search)) {
+            std.log.err("No replacements in {s} for search {s}", .{source_src, replacement.search});
+            return error.MissingReplacement;
+        }
         var new_data = try std.mem.replaceOwned(u8, allocator, replaced_data, replacement.search, replacement.replacement);
         allocator.free(replaced_data);
         replaced_data = new_data;
