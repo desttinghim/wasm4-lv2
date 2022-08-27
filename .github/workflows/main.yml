@@ -7,6 +7,8 @@ on:
   # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
     branches: [ "main" ]
+    tags:
+      - 'v*.*.*'
   pull_request:
     branches: [ "main" ]
 
@@ -15,7 +17,6 @@ on:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
     name: Build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -26,15 +27,15 @@ jobs:
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
-        with:
-          submodules: true
-      
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v1.3.0
         with:
           version: master
+
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
 
       # Runs a single command using the runners shell
       - name: Build bundle
@@ -44,8 +45,49 @@ jobs:
         run: echo "::set-output name=version::$(zig build -Dversion)"
         id: version
 
+      - name: Tar files
+        run: tar -cvf wasm4-lv2-${{ steps.version.outputs.version }}-${{ matrix.os }}.tar ./zig-out/wasm4.lv2
+
       - name: Upload bundle
         uses: actions/upload-artifact@v3
         with:
-          name: wasm4-lv2-${{ steps.version.outputs.version }}-${{ matrix.os }}
-          path: ./*/wasm4.lv2
+          path: ./*.tar
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v1.3.0
+        with:
+          version: master
+
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+
+      - name: Version
+        run: echo "::set-output name=version::$(zig build -Dversion)"
+        id: version
+
+      - uses: actions/download-artifact@v3
+        id: download
+
+      - name: Release
+        uses: softprops/actions-gh-release@v1
+        with:
+          files: |
+            *.tar
+
+
+      - name: upload linux artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: steps.download
+          asset_name: azblogfilter.linux-amd64.tar.gz
+          asset_content_type: application/gzip
