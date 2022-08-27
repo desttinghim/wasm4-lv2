@@ -21,7 +21,8 @@ pub fn build(b: *std.build.Builder) !void {
     const print_version = b.option(bool, "version", "logs version number to output") orelse false;
     const skip = b.option(bool, "skip", "skips building binary") orelse false;
     if (print_version) {
-        std.debug.print("{s}", .{version_str});
+        const stdout = std.io.getStdOut().writer();
+        try stdout.print("{s}", .{version_str});
     }
     if (!skip) {
         const lib = b.addSharedLibrary("wasm4", "src/main.zig", version);
