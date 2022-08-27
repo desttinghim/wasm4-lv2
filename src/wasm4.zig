@@ -39,6 +39,7 @@ pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, feat
     };
 
     c.w4_apuInit(&this.apu, @floatToInt(u16, sample_rate));
+    std.log.info("Host sample_rate={}, APU sample_rate={}", .{sample_rate, this.apu.sample_rate});
 }
 
 pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
@@ -53,12 +54,31 @@ pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
 }
 
 fn play(this: *@This(), controls: std.EnumArray(ControlPort, *const f32), output: []f32, start: u32, end: u32) void {
-    var buffer = this.buffer_i16[start..end];
+    // if (output.len > end - start) {
+    //     std.log.info("play {} {} - apu time {}", .{ start, end, this.apu.time });
+    //     for (this.apu.channels) |chan| {
+    //         std.log.info("channel f1 {} f2 {} start {} attack {} decay {} sustain {} release {} sustainVolume {} peakVolume {} pan {}", .{
+    //             chan.freq1,
+    //             chan.freq2,
+    //             chan.startTime,
+    //             chan.attackTime,
+    //             chan.decayTime,
+    //             chan.sustainTime,
+    //             chan.releaseTime,
+    //             chan.sustainVolume,
+    //             chan.peakVolume,
+    //             chan.pan,
+    //         });
+    //     }
+    // }
+    var buffer = this.buffer_i16[start * 2..end * 2];
     c.w4_apuWriteSamples(&this.apu, buffer.ptr, buffer.len);
-    const max_volume = @intToFloat(f32, this.apu.max_volume);
+    const max_volume = @intToFloat(f32, std.math.maxInt(u16));
     var i = start;
     while (i < end) : (i += 1) {
-        output[i] = (@intToFloat(f32, this.buffer_i16[i]) / max_volume) * controls.get(.Level).*;
+        output[i] = (@intToFloat(f32, this.buffer_i16[i * 2]) / max_volume) * controls.get(.Level).*;
+        // if (!std.math.approxEqAbs(f32, output[i], 0, 0.1)) std.log.info("sample {}", .{output[i]});
+        // if (this.buffer_i16[i] != 0) std.log.info("int sample {}", .{this.buffer_i16[i]});
     }
 }
 
@@ -86,30 +106,53 @@ pub fn run(this: *@This(), sample_count: u32) !void {
             const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
             switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON => {
-                    const frequency = @floatToInt(i32, midi2freq(ev.msg[1]));
+                    const frequency = @floatToInt(u32, midi2freq(ev.msg[1]));
 
-                    const attack = @maximum(0, @minimum(255, @floatToInt(i32, controls.get(.Attack).* * 255)));
-                    const decay = @maximum(0, @minimum(255, @floatToInt(i32, controls.get(.Attack).* * 255)));
-                    const sustain = @maximum(0, @minimum(255, @floatToInt(i32, controls.get(.Attack).* * 255)));
-                    const release = @maximum(0, @minimum(255, @floatToInt(i32, controls.get(.Attack).* * 255)));
+                    // const attack = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Attack).* * 255)));
+                    // const decay = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Decay).* * 255)));
+                    // const sustain = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Sustain).* * 255)));
+                    // const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).* * 255)));
+                    const attack: u32 = 10;
+                    const decay: u32 = 10;
+                    const sustain: u32 = 10;
+                    const release: u32 = 10;
                     const duration = sustain | release << 8 | decay << 16 | attack << 24;
 
-                    const peak = @floatToInt(i32, controls.get(.Peak).*);
-                    const volume_sustain = @maximum(0, @minimum(100,@floatToInt(u16, controls.get(.Level).* * 100)));
+                    const peak = @floatToInt(u32, controls.get(.Peak).*);
+                    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Level).* * 100)));
                     const volume = volume_sustain | peak << 8;
 
-                    const channel = @floatToInt(i32, controls.get(.Channel).*);
-                    const mode = @floatToInt(i32, controls.get(.Mode).*);
-                    const pan = @floatToInt(i32, controls.get(.Pan).*);
+                    const channel = @floatToInt(u32, controls.get(.Channel).*);
+                    const mode = @floatToInt(u32, controls.get(.Mode).*);
+                    const pan = @floatToInt(u32, controls.get(.Pan).*);
 
                     const flags = channel | mode << 2 | pan << 4;
 
+                    // std.log.info("note on {} {x} {} {}", .{ frequency, duration, volume, flags });
+
                     c.w4_apuTone(&this.apu, frequency, duration, volume, flags);
+
+                    // for (this.apu.channels) |chan| {
+                    //     std.log.info("channel f1 {} f2 {} start {} attack {} decay {} sustain {} release {} sustainVolume {} peakVolume {} pan {}", .{
+                    //         chan.freq1,
+                    //         chan.freq2,
+                    //         chan.startTime,
+                    //         chan.attackTime,
+                    //         chan.decayTime,
+                    //         chan.sustainTime,
+                    //         chan.releaseTime,
+                    //         chan.sustainVolume,
+                    //         chan.peakVolume,
+                    //         chan.pan,
+                    //     });
+                    // }
                 },
                 c.LV2_MIDI_MSG_NOTE_OFF => {
+                    // std.log.info("note off", .{});
                     c.w4_apuTone(&this.apu, 0, 0, 0, 0);
                 },
                 c.LV2_MIDI_MSG_CONTROLLER => {
+                    // std.log.info("control", .{});
                     switch (ev.msg[1]) {
                         c.LV2_MIDI_CTL_ALL_NOTES_OFF,
                         c.LV2_MIDI_CTL_ALL_SOUNDS_OFF,

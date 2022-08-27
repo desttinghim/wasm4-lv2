@@ -55,7 +55,7 @@ static float polyblep (float phase, float phaseInc) {
     }
 }
 
-void w4_apuInit (APU *apu, uint16_t sample_rate) {
+void w4_apuInit (APU *apu, uint32_t sample_rate) {
     apu->channels[3].noise.seed = 0x0001;
     apu->time = 0;
     apu->sample_rate = sample_rate;
@@ -77,7 +77,7 @@ void w4_apuInit (APU *apu, uint16_t sample_rate) {
     }
 }
 
-void w4_apuTone (APU *apu, int frequency, int duration, int volume, int flags) {
+void w4_apuTone (WASM4_APU* apu, uint32_t frequency, uint32_t duration, uint32_t volume, uint32_t flags) {
     int freq1 = frequency & 0xffff;
     int freq2 = (frequency >> 16) & 0xffff;
 
