@@ -62,3 +62,5 @@ This plugin is a work in progress, there is still some items left to work on.
 - [ ] Stereo output (currently only one channel is playing back)
 - [ ] Provide releases and better install instructions
 - [ ] Better handling of notes
+- [ ] Detect slides
+- [ ] Percussion mode

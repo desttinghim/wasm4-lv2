@@ -51,7 +51,7 @@ pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
 
 fn play(this: *@This(), controls: ControlArray, output: []f32, start: u32, end: u32) void {
     var buffer = this.buffer_i16[start * 2..end * 2];
-    c.w4_apuWriteSamples(&this.apu, buffer.ptr, buffer.len);
+    c.w4_apuWriteSamples(&this.apu, buffer.ptr, @intCast(c_ulong, buffer.len));
     const max_volume = @intToFloat(f32, std.math.maxInt(u16));
     var i = start;
     while (i < end) : (i += 1) {

@@ -4,5 +4,5 @@
 
 <https://github.com/desttinghim/wasm4-lv2>
     a lv2:Plugin ;
-    lv2:binary <wasm4@LIB_EXT@> ;
+    lv2:binary <@LIB_NAME@> ;
     rdfs:seeAlso <wasm4.ttl> .
