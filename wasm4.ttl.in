@@ -7,6 +7,9 @@
 @prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix urid:  <http://lv2plug.in/ns/ext/urid#> .
 @prefix pprops: <http://lv2plug.in/ns/ext/port-props#> .
+@prefix param: <http://lv2plug.in/ns/ext/parameters#> .
+@prefix group: <http://lv2plug.in/ns/ext/port-groups#> .
+@prefix bufsize: <http://lv2plug.in/ns/ext/buf-size#> .
 
 <https://github.com/desttinghim/wasm4-lv2>
     a lv2:Plugin ,
@@ -16,6 +19,7 @@
     lv2:project <https://github.com/desttinghim/wasm4-lv2> ;
     lv2:optionalFeature lv2:hardRTCapable ;
     lv2:requiredFeature urid:map ;
+    lv2:requiredFeature bufsize:boundedBlockLength ;
     lv2:minorVersion @VERSION_MINOR@ ;
     lv2:microVersion @VERSION_MICRO@ ;
     lv2:port [
@@ -28,8 +32,15 @@
     ] , [
         a lv2:OutputPort, lv2:AudioPort ;
         lv2:index 1 ;
-        lv2:symbol "audio_out" ;
-        lv2:name "Audio Output"
+        lv2:symbol "audio_left" ;
+        lv2:name "Audio Output Left" ;
+        lv2:designation group:left ;
+    ] , [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 13 ;
+        lv2:symbol "audio_right" ;
+        lv2:name "Audio Output Right" ;
+        lv2:designation group:right ;
     ] , [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 2 ;
@@ -43,6 +54,7 @@
         lv2:default 0 ;
         lv2:minimum 0 ;
         lv2:maximum 4 ;
+        lv2:designation param:waveform ;
     ] , [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 3 ;
@@ -53,6 +65,7 @@
         lv2:maximum 4.25 ;
         units:unit   units:s ;
         lv2:portProperty pprops:logarithmic ;
+        lv2:designation param:attack ;
     ] , [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 4 ;
@@ -63,6 +76,7 @@
         lv2:maximum 4.25 ;
         units:unit   units:s ;
         lv2:portProperty pprops:logarithmic ;
+        lv2:designation param:decay ;
     ] , [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 5 ;
@@ -71,6 +85,8 @@
         lv2:default 0.16 ;
         lv2:minimum 0.16 ;
         lv2:maximum 4.25 ;
+        units:unit   units:s ;
+        lv2:portProperty pprops:logarithmic ;
     ] , [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 6 ;
@@ -81,6 +97,7 @@
         lv2:maximum 4.25 ;
         units:unit   units:s ;
         lv2:portProperty pprops:logarithmic ;
+        lv2:designation param:release ;
     ] , [
         a lv2:InputPort , lv2:ControlPort ;
         lv2:index 7 ;
@@ -122,4 +139,37 @@
         lv2:default 0 ;
         lv2:minimum 0 ;
         lv2:maximum 4 ;
+        lv2:designation param:pulseWidth ;
+    ] , [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 11 ;
+        lv2:symbol "start_freq" ;
+        lv2:name "Start Frequency" ;
+        lv2:portProperty lv2:integer ;
+        lv2:default 0 ;
+        lv2:minimum 0 ;
+        lv2:maximum 65535 ;
+        lv2:designation param:frequency ;
+    ] , [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 12 ;
+        lv2:symbol "end_freq" ;
+        lv2:name "End Frequency" ;
+        lv2:portProperty lv2:integer ;
+        lv2:default 0 ;
+        lv2:minimum 0 ;
+        lv2:maximum 65535 ;
+        lv2:designation param:frequency ;
+    ] , [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 14 ;
+        lv2:symbol "sustain_mode" ;
+        lv2:name "Sustain Mode" ;
+        lv2:portProperty lv2:integer , lv2:enumeration ;
+        lv2:scalePoint [ rdfs:label "On" ; rdf:value 0 ] ;
+        lv2:scalePoint [ rdfs:label "Off" ; rdf:value 1 ] ;
+        lv2:default 0 ;
+        lv2:minimum 0 ;
+        lv2:maximum 4 ;
+        lv2:designation param:pulseWidth ;
     ] .

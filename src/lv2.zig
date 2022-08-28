@@ -1,19 +1,32 @@
 const std = @import("std");
 const c = @import("c.zig");
 
-pub const FeatureQuery = struct {
+pub const URIQuery = struct {
     uri: [*:0]const u8,
     required: bool,
 };
 
 
-pub fn queryFeatures(alloc: std.mem.Allocator, features: [*]const ?[*]const c.LV2_Feature, wanted: []const FeatureQuery) ![]?*anyopaque {
+pub fn queryFeatures(alloc: std.mem.Allocator, features: [*]const ?[*]const c.LV2_Feature, wanted: []const URIQuery) ![]?*anyopaque {
     var found = try alloc.alloc(?*anyopaque, wanted.len);
     for (wanted) |want, i| {
         found[i] = c.lv2_features_data(features, want.uri);
     }
 
     return found;
+}
+
+
+pub fn queryOption(options: [*]const c.LV2_Options_Option, wanted: u32) ?c.LV2_Options_Option {
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        if (options[i].size == 0) return null;
+        if (options[i].key == wanted) {
+            return options[i];
+        }
+    }
+
+    return null;
 }
 
 pub const Event = struct {

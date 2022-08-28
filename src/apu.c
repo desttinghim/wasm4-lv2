@@ -135,7 +135,7 @@ void w4_apuTone (WASM4_APU* apu, uint32_t frequency, uint32_t duration, uint32_t
 }
 
 void w4_apuWriteSamples (APU *apu, int16_t* output, unsigned long frames) {
-    for (int ii = 0; ii < frames; ++ii, ++apu->time) {
+    for (int ii = 0; ii < frames; ++apu->time) {
         int16_t mix_left = 0, mix_right = 0;
 
         for (int channelIdx = 0; channelIdx < 4; ++channelIdx) {
@@ -199,6 +199,8 @@ void w4_apuWriteSamples (APU *apu, int16_t* output, unsigned long frames) {
         }
 
         output[ii] = mix_left;
+        ii += 1;
         output[ii] = mix_right;
+        ii += 1;
     }
 }
