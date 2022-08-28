@@ -84,7 +84,7 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
     const frequency = freq: {
         const start = controls.get(.StartFreq).*;
         const end = controls.get(.EndFreq).*;
-        if (@fabs(start) < 0.1 and @fabs(end) < 1.0) {
+        if (@fabs(end) < 1.0) {
             break :freq @floatToInt(u32, midi2freq(event.msg[1]));
         } else {
             const starti = 0xFFFF & @floatToInt(u32, start);
@@ -96,7 +96,7 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
     const attack = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Attack).* * 60)));
     const decay = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Decay).* * 60)));
     const sustain = sustain: {
-        if (@floatToInt(u32, controls.get(.SustainMode).*) == 0) {
+        if (@floatToInt(u32, controls.get(.SustainMode).*) == 1) {
             break :sustain @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Sustain).* * 60)));
         }
         break :sustain @as(u32, 255);
@@ -118,6 +118,9 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
 }
 
 fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event) void {
+    if (@floatToInt(u32, controls.get(.SustainMode).*) == 1) {
+        return;
+    }
     const frequency = @floatToInt(u32, midi2freq(event.msg[1]));
 
     const attack = 0;
