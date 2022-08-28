@@ -88,7 +88,7 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
             break :freq @floatToInt(u32, midi2freq(event.msg[1]));
         } else {
             const starti = 0xFFFF & @floatToInt(u32, start);
-            const endi = 0xFFFF & @floatToInt(u32, start);
+            const endi = 0xFFFF & @floatToInt(u32, end);
             break :freq starti | endi << 16;
         }
     };
