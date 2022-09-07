@@ -20,6 +20,7 @@ uris: URIs,
 sample_rate: f64,
 position: f64 = 0,
 apu: c.WASM4_APU = undefined,
+current_note: [4]u8 = .{0,0,0,0},
 buffer_i16: []i16,
 
 pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, features: [*]const ?[*]const c.LV2_Feature) !void {
@@ -173,9 +174,12 @@ pub fn run(this: *@This(), sample_count: u32) !void {
             switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON => {
                     this.tone(controls, ev);
+                    this.current_note[0] = ev.msg[1];
                 },
                 c.LV2_MIDI_MSG_NOTE_OFF => {
-                    this.toneOff(controls, ev);
+                    if (this.current_note[0] == ev.msg[1]) {
+                        this.toneOff(controls, ev);
+                    }
                 },
                 c.LV2_MIDI_MSG_CONTROLLER => {
                     switch (ev.msg[1]) {

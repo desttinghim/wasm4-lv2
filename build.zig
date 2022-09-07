@@ -13,7 +13,7 @@ pub fn build(b: *std.build.Builder) !void {
     // Create bundle directory
     const bundle_dir = std.build.InstallDir{ .custom = "wasm4.lv2" };
 
-    const version = b.version(0, 1, 0);
+    const version = b.version(0, 1, 1);
     const version_str = b.fmt("v{}.{}.{}", .{ version.versioned.major, version.versioned.minor, version.versioned.patch });
     const version_minor = try std.fmt.allocPrint(b.allocator, "{}", .{version.versioned.minor});
     const version_micro = try std.fmt.allocPrint(b.allocator, "{}", .{version.versioned.patch});
