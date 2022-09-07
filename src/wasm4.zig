@@ -109,7 +109,8 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
     const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).* * 100)));
     const volume = volume_sustain | peak << 8;
 
-    const channel = @floatToInt(u32, controls.get(.Channel).*);
+    const channel_real = @intCast(u32, event.msg[0] & 0b1111); // Read channel from last 4 bits of status byte
+    const channel = if (channel_real < 4) channel_real else 0;
     const mode = @floatToInt(u32, controls.get(.Mode).*);
     const pan = @floatToInt(u32, controls.get(.Pan).*);
 
@@ -134,7 +135,8 @@ fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event) void {
     const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).* * 100)));
     const volume = volume_sustain | peak << 8;
 
-    const channel = @floatToInt(u32, controls.get(.Channel).*);
+    const channel_real = @intCast(u32, event.msg[0] & 0b1111); // Read channel from last 4 bits of status byte
+    const channel = if (channel_real < 4) channel_real else 0;
     const mode = @floatToInt(u32, controls.get(.Mode).*);
     const pan = @floatToInt(u32, controls.get(.Pan).*);
 
@@ -145,6 +147,9 @@ fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event) void {
 
 fn toneAllOff(this: *@This()) void {
     c.w4_apuTone(&this.apu, 0, 0, 0, 0);
+    c.w4_apuTone(&this.apu, 0, 0, 0, 1);
+    c.w4_apuTone(&this.apu, 0, 0, 0, 2);
+    c.w4_apuTone(&this.apu, 0, 0, 0, 3);
 }
 
 pub fn run(this: *@This(), sample_count: u32) !void {
@@ -171,21 +176,35 @@ pub fn run(this: *@This(), sample_count: u32) !void {
 
         if (ev.ev.body.type == this.uris.midi_Event) {
             const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
+            const channel_real = @intCast(u32, ev.msg[0] & 0b1111); // Read channel from last 4 bits of status byte
+            const channel = if (channel_real < 4) channel_real else 0;
             switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON => {
                     this.tone(controls, ev);
-                    this.current_note[0] = ev.msg[1];
+                    this.current_note[channel] = ev.msg[1];
                 },
                 c.LV2_MIDI_MSG_NOTE_OFF => {
-                    if (this.current_note[0] == ev.msg[1]) {
+                    if (this.current_note[channel] == ev.msg[1]) {
                         this.toneOff(controls, ev);
                     }
+                },
+                c.LV2_MIDI_MSG_PGM_CHANGE => {
+                    // TODO: change the "instrument"
                 },
                 c.LV2_MIDI_MSG_CONTROLLER => {
                     switch (ev.msg[1]) {
                         c.LV2_MIDI_CTL_ALL_NOTES_OFF,
                         c.LV2_MIDI_CTL_ALL_SOUNDS_OFF,
                         => this.toneAllOff(),
+                        c.LV2_MIDI_CTL_MSB_BANK => {
+                            // TODO: swap out presets?
+                        },
+                        c.LV2_MIDI_CTL_SUSTAIN => {
+                            // TODO
+                        },
+                        c.LV2_MIDI_CTL_PORTAMENTO => {
+                            // TODO
+                        },
                         else => {},
                     }
                 },
