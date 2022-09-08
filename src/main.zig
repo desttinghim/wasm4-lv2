@@ -37,7 +37,7 @@ export fn connect_port(instance: c.LV2_Handle, port: u32, data: ?*anyopaque) voi
     if (data == null) return;
     const self = @ptrCast(*WASM4, @alignCast(@alignOf(*WASM4), instance));
 
-    self.connect_port(@intToEnum(WASM4.PortIndex, port), data);
+    self.connect_port(port, data);
 }
 
 export fn run(instance: c.LV2_Handle, sample_count: u32) void {

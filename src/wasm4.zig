@@ -20,7 +20,7 @@ uris: URIs,
 sample_rate: f64,
 position: f64 = 0,
 apu: c.WASM4_APU = undefined,
-current_note: [4]u8 = .{0,0,0,0},
+current_note: [4]u8 = .{ 0, 0, 0, 0 },
 buffer_i16: []i16,
 
 pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, features: [*]const ?[*]const c.LV2_Feature) !void {
@@ -58,15 +58,19 @@ pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, feat
     std.log.info("Host sample_rate={}, APU sample_rate={}", .{ sample_rate, this.apu.sample_rate });
 }
 
-pub fn connect_port(this: *@This(), port: PortIndex, ptr: ?*anyopaque) void {
+pub fn connect_port(this: *@This(), portIndex: u32, ptr: ?*anyopaque) void {
+    const port = std.meta.intToEnum(PortIndex, portIndex) catch {
+        const control = std.meta.intToEnum(ControlPort, portIndex) catch {
+            // TODO: log error
+            return;
+        };
+        this.controls.set(control, @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)));
+        return;
+    };
     switch (port) {
         .Input => this.in_port = @ptrCast(*const c.LV2_Atom_Sequence, @alignCast(@alignOf(c.LV2_Atom_Sequence), ptr)),
         .OutputLeft => this.out_left_port = @ptrCast([*]f32, @alignCast(@alignOf([*]f32), ptr)),
         .OutputRight => this.out_right_port = @ptrCast([*]f32, @alignCast(@alignOf([*]f32), ptr)),
-        else => {
-            const control = @intToEnum(ControlPort, @enumToInt(port));
-            this.controls.set(control, @ptrCast(*const f32, @alignCast(@alignOf(f32), ptr)));
-        },
     }
 }
 
@@ -81,7 +85,7 @@ fn play(this: *@This(), controls: ControlArray, output_left: []f32, output_right
     }
 }
 
-fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
+fn tone(this: *@This(), controls: ControlArray, event: lv2.Event, channel: u32) void {
     const frequency = freq: {
         const start = controls.get(.StartFreq).*;
         const end = controls.get(.EndFreq).*;
@@ -94,23 +98,21 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
         }
     };
 
-    const attack = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Attack).* * 60)));
-    const decay = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Decay).* * 60)));
+    const attack = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Attack).*)));
+    const decay = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Decay).*)));
     const sustain = sustain: {
         if (@floatToInt(u32, controls.get(.SustainMode).*) == 1) {
-            break :sustain @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Sustain).* * 60)));
+            break :sustain @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Sustain).*)));
         }
         break :sustain @as(u32, 255);
     };
-    const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).* * 60)));
+    const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).*)));
     const duration = sustain | release << 8 | decay << 16 | attack << 24;
 
     const peak = @floatToInt(u32, controls.get(.Peak).*);
-    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).* * 100)));
+    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).*)));
     const volume = volume_sustain | peak << 8;
 
-    const channel_real = @intCast(u32, event.msg[0] & 0b1111); // Read channel from last 4 bits of status byte
-    const channel = if (channel_real < 4) channel_real else 0;
     const mode = @floatToInt(u32, controls.get(.Mode).*);
     const pan = @floatToInt(u32, controls.get(.Pan).*);
 
@@ -119,7 +121,7 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event) void {
     c.w4_apuTone(&this.apu, frequency, duration, volume, flags);
 }
 
-fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event) void {
+fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event, channel: u32) void {
     if (@floatToInt(u32, controls.get(.SustainMode).*) == 1) {
         return;
     }
@@ -128,15 +130,13 @@ fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event) void {
     const attack = 0;
     const decay = 0;
     const sustain = 0;
-    const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).* * 60)));
+    const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).*)));
     const duration = sustain | release << 8 | decay << 16 | attack << 24;
 
     const peak = @floatToInt(u32, controls.get(.Peak).*);
-    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).* * 100)));
+    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).*)));
     const volume = volume_sustain | peak << 8;
 
-    const channel_real = @intCast(u32, event.msg[0] & 0b1111); // Read channel from last 4 bits of status byte
-    const channel = if (channel_real < 4) channel_real else 0;
     const mode = @floatToInt(u32, controls.get(.Mode).*);
     const pan = @floatToInt(u32, controls.get(.Pan).*);
 
@@ -169,23 +169,34 @@ pub fn run(this: *@This(), sample_count: u32) !void {
     var last_frame: i64 = 0;
     // Read incoming events
     var iter = lv2.AtomEventReader.init(in_port);
-    while (iter.next()) |ev| {
+    midi_loop: while (iter.next()) |ev| {
         const frame = ev.ev.time.frames;
         this.play(controls, output_left, output_right, @intCast(u32, last_frame), @intCast(u32, frame));
         last_frame = frame;
 
         if (ev.ev.body.type == this.uris.midi_Event) {
             const msg_type = if (ev.msg.len > 1) ev.msg[0] else continue;
-            const channel_real = @intCast(u32, ev.msg[0] & 0b1111); // Read channel from last 4 bits of status byte
-            const channel = if (channel_real < 4) channel_real else 0;
+            const channel_real = @intCast(u32, ev.msg[0] & 0b1111) + 1; // Read channel from last 4 bits of status byte
+            const channel: u32 = chan: {
+                if (@floatToInt(u32, controls.get(.Pulse1Channel).*) == channel_real) {
+                    break :chan 0;
+                } else if (@floatToInt(u32, controls.get(.Pulse2Channel).*) == channel_real) {
+                    break :chan 1;
+                } else if (@floatToInt(u32, controls.get(.TriangleChannel).*) == channel_real) {
+                    break :chan 2;
+                } else if (@floatToInt(u32, controls.get(.NoiseChannel).*) == channel_real) {
+                    break :chan 3;
+                }
+                continue :midi_loop;
+            };
             switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON => {
-                    this.tone(controls, ev);
+                    this.tone(controls, ev, channel);
                     this.current_note[channel] = ev.msg[1];
                 },
                 c.LV2_MIDI_MSG_NOTE_OFF => {
                     if (this.current_note[channel] == ev.msg[1]) {
-                        this.toneOff(controls, ev);
+                        this.toneOff(controls, ev, channel);
                     }
                 },
                 c.LV2_MIDI_MSG_PGM_CHANGE => {
@@ -230,23 +241,10 @@ pub const required_features = [_]lv2.URIQuery{
 pub const PortIndex = enum(usize) {
     Input = 0,
     OutputLeft = 1,
-    Channel = 2,
-    Attack = 3,
-    Decay = 4,
-    Sustain = 5,
-    Release = 6,
-    Peak = 7,
-    Pan = 8,
-    Volume = 9,
-    Mode = 10,
-    StartFreq = 11,
-    EndFreq = 12,
-    OutputRight = 13,
-    SustainMode = 14,
+    OutputRight = 2,
 };
 
 pub const ControlPort = enum(usize) {
-    Channel = 2,
     Attack = 3,
     Decay = 4,
     Sustain = 5,
@@ -257,7 +255,11 @@ pub const ControlPort = enum(usize) {
     Mode = 10,
     StartFreq = 11,
     EndFreq = 12,
-    SustainMode = 14,
+    SustainMode = 13,
+    Pulse1Channel = 14,
+    Pulse2Channel = 15,
+    TriangleChannel = 16,
+    NoiseChannel = 17,
 };
 
 const ControlPortArray = std.EnumArray(ControlPort, ?*const f32);
