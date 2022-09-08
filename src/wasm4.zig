@@ -22,6 +22,12 @@ position: f64 = 0,
 apu: c.WASM4_APU = undefined,
 current_note: [4]u8 = .{ 0, 0, 0, 0 },
 buffer_i16: []i16,
+note_mode: enum { Legato, Staccato } = .Staccato,
+portamento_on: bool = false,
+portamento: ?struct {
+    channel: usize,
+    note: u8,
+} = null,
 
 pub fn init(this: *@This(), allocator: std.mem.Allocator, sample_rate: f64, features: [*]const ?[*]const c.LV2_Feature) !void {
     const presentFeatures = try lv2.queryFeatures(allocator, features, &required_features);
@@ -87,6 +93,16 @@ fn play(this: *@This(), controls: ControlArray, output_left: []f32, output_right
 
 fn tone(this: *@This(), controls: ControlArray, event: lv2.Event, channel: u32) void {
     const frequency = freq: {
+        if (this.portamento_on) {
+            if (this.portamento) |portamento| {
+                if (portamento.channel == channel) {
+                    const starti = 0xFFFF & @floatToInt(u32, midi2freq(portamento.note));
+                    const endi = 0xFFFF & @floatToInt(u32, midi2freq(event.msg[1]));
+                    this.portamento = null;
+                    break :freq starti | endi << 16;
+                }
+            }
+        }
         const start = controls.get(.StartFreq).*;
         const end = controls.get(.EndFreq).*;
         if (@fabs(end) < 1.0) {
@@ -220,6 +236,13 @@ pub fn run(this: *@This(), sample_count: u32) !void {
                         },
                         c.LV2_MIDI_CTL_PORTAMENTO => {
                             // TODO
+                            this.portamento_on = ev.msg[2] > 63;
+                        },
+                        c.LV2_MIDI_CTL_PORTAMENTO_CONTROL => {
+                            this.portamento = .{
+                                .note = ev.msg[2],
+                                .channel = channel,
+                            };
                         },
                         else => {},
                     }
