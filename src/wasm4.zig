@@ -20,7 +20,7 @@ uris: URIs,
 sample_rate: f64,
 position: f64 = 0,
 apu: c.WASM4_APU = undefined,
-current_note: [4]u8 = .{ 0, 0, 0, 0 },
+current_note: [4]NoteEvent = .{.{ .status = 0, .note = 0, .velocity = 0 }} ** 4,
 buffer_i16: []i16,
 note_mode: enum { Legato, Staccato } = .Staccato,
 portamento_on: bool = false,
@@ -81,13 +81,14 @@ pub fn connect_port(this: *@This(), portIndex: u32, ptr: ?*anyopaque) void {
 }
 
 fn play(this: *@This(), controls: ControlArray, output_left: []f32, output_right: []f32, start: u32, end: u32) void {
+    _ = controls;
     var buffer = this.buffer_i16[start * 2 .. end * 2 + 1];
     c.w4_apuWriteSamples(&this.apu, buffer.ptr, @intCast(c_ulong, buffer.len));
     const max_volume = @intToFloat(f32, std.math.maxInt(u16));
     var i = start;
     while (i < end) : (i += 1) {
-        output_left[i] = (@intToFloat(f32, this.buffer_i16[i * 2]) / max_volume) * controls.get(.Volume).*;
-        output_right[i] = (@intToFloat(f32, this.buffer_i16[i * 2 + 1]) / max_volume) * controls.get(.Volume).*;
+        output_left[i] = (@intToFloat(f32, this.buffer_i16[i * 2]) / max_volume);
+        output_right[i] = (@intToFloat(f32, this.buffer_i16[i * 2 + 1]) / max_volume);
     }
 }
 
@@ -122,16 +123,12 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event, channel: u32) 
         }
         break :sustain @as(u32, 255);
     };
-    const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).*)));
+    const release: u32 = 0; // @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).*)));
     const duration = sustain | release << 8 | decay << 16 | attack << 24;
 
-    const peak = @floatToInt(u32, controls.get(.Peak).*);
-    const volume_sustain = sustain: {
-        if (@floatToInt(u32, controls.get(.SustainMode).*) == 1) {
-            break :sustain @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).*)));
-        }
-        break :sustain @maximum(0, @minimum(100, event.msg[2]));
-    };
+    const max_volume = @floatToInt(u16, 100);
+    const volume_sustain = @maximum(0, @minimum(max_volume, event.msg[2]));
+    const peak = @maximum(0, @minimum(max_volume, @floatToInt(u32, controls.get(.Peak).*)));
     const volume = volume_sustain | peak << 8;
 
     const mode = @floatToInt(u32, controls.get(.Mode).*);
@@ -154,8 +151,9 @@ fn toneOff(this: *@This(), controls: ControlArray, event: lv2.Event, channel: u3
     const release = @maximum(0, @minimum(255, @floatToInt(u32, controls.get(.Release).*)));
     const duration = sustain | release << 8 | decay << 16 | attack << 24;
 
-    const peak = @floatToInt(u32, controls.get(.Peak).*);
-    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).*)));
+    const max_volume = @floatToInt(u16, 100);
+    const volume_sustain = @maximum(0, @minimum(max_volume, this.current_note[channel].velocity));
+    const peak = volume_sustain; // Don't let the volume go to 100
     const volume = volume_sustain | peak << 8;
 
     const mode = @floatToInt(u32, controls.get(.Mode).*);
@@ -213,10 +211,10 @@ pub fn run(this: *@This(), sample_count: u32) !void {
             switch (c.lv2_midi_message_type(&msg_type)) {
                 c.LV2_MIDI_MSG_NOTE_ON => {
                     this.tone(controls, ev, channel);
-                    this.current_note[channel] = ev.msg[1];
+                    this.current_note[channel] = NoteEvent.fromEvent(ev);
                 },
                 c.LV2_MIDI_MSG_NOTE_OFF => {
-                    if (this.current_note[channel] == ev.msg[1]) {
+                    if (this.current_note[channel].note == ev.msg[1]) {
                         this.toneOff(controls, ev, channel);
                     }
                 },
@@ -260,6 +258,20 @@ pub fn run(this: *@This(), sample_count: u32) !void {
 fn midi2freq(note: u8) f32 {
     return std.math.pow(f32, 2.0, (@intToFloat(f32, note) - 69.0) / 12.0) * 440;
 }
+
+const NoteEvent = struct {
+    status: u8,
+    note: u8,
+    velocity: u8,
+
+    pub fn fromEvent(ev: lv2.Event) @This() {
+        return .{
+            .status = ev.msg[0],
+            .note = ev.msg[1],
+            .velocity = ev.msg[2],
+        };
+    }
+};
 
 pub const required_features = [_]lv2.URIQuery{
     .{ .uri = c.LV2_URID__map, .required = true },
