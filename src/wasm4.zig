@@ -110,7 +110,12 @@ fn tone(this: *@This(), controls: ControlArray, event: lv2.Event, channel: u32) 
     const duration = sustain | release << 8 | decay << 16 | attack << 24;
 
     const peak = @floatToInt(u32, controls.get(.Peak).*);
-    const volume_sustain = @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).*)));
+    const volume_sustain = sustain: {
+        if (@floatToInt(u32, controls.get(.SustainMode).*) == 1) {
+            break :sustain @maximum(0, @minimum(100, @floatToInt(u16, controls.get(.Volume).*)));
+        }
+        break :sustain @maximum(0, @minimum(100, event.msg[2]));
+    };
     const volume = volume_sustain | peak << 8;
 
     const mode = @floatToInt(u32, controls.get(.Mode).*);
